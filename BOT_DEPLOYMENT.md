@@ -181,7 +181,17 @@ The script runs `git pull`, installs bot dependencies, and restarts PM2.
 - `/remind snooze id due`
 - `/remind testdm`
 
+The `/remind` command is registered globally with guild install, user install, server, bot-DM, and private-channel contexts. That lets it appear in servers and DMs once Discord has propagated the global command update.
+
 Only Discord user `203025242753335296` can use the commands. Other users receive a private denial.
+
+If the command does not show in DMs:
+
+1. Open the Discord Developer Portal.
+2. Select the NahkriinOS reminder bot application.
+3. Confirm the app can be installed by users if you want private/user-install commands.
+4. Reinstall/reinvite the app with the `applications.commands` scope. For servers, include the `bot` scope too.
+5. Restart the VPS bot so it re-registers global commands.
 
 ## Desktop Sync
 

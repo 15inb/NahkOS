@@ -142,7 +142,9 @@ npm run deploy:bot:vps
 - `/remind snooze`
 - `/remind testdm`
 
-Commands are restricted to Discord user ID `203025242753335296`.
+Commands are registered globally and are available in servers, bot DMs, and private/user-install contexts when the Discord application is installed with the right scopes. Commands are still restricted to Discord user ID `203025242753335296`.
+
+If commands do not appear in DMs, open the Discord Developer Portal for the bot application and make sure the app supports user installation. Then install/reinvite with the `applications.commands` scope, plus `bot` for server installs.
 
 ## Security Notes
 

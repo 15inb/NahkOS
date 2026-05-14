@@ -6,9 +6,11 @@ import crypto from "node:crypto";
 import Database from "better-sqlite3";
 import * as chrono from "chrono-node";
 import {
+  ApplicationIntegrationType,
   Client,
   Events,
   GatewayIntentBits,
+  InteractionContextType,
   REST,
   Routes,
   SlashCommandBuilder
@@ -239,6 +241,8 @@ const commands = [
   new SlashCommandBuilder()
     .setName("remind")
     .setDescription("Manage NahkriinOS reminders")
+    .setIntegrationTypes(ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall)
+    .setContexts(InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel)
     .addSubcommand((sub) => sub
       .setName("add")
       .setDescription("Add a reminder")

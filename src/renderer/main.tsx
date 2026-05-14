@@ -934,6 +934,60 @@ function ClipboardView({ data, setData }: { data: AppData; setData: (data: AppDa
   return <section className="page"><div className="section-header"><h2>Clipboard</h2><button onClick={async () => setData(await window.assistant.clipboard.clear())}><Trash2 size={16} /> Clear unpinned</button></div><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search clipboard history" /> <Panel title="History">{items.map((item) => <Row key={item.id} title={item.text.slice(0, 100)} meta={formatDistanceToNow(new Date(item.createdAt), { addSuffix: true })} action={<><button onClick={async () => setData(await window.assistant.clipboard.togglePin(item.id))}><Star size={15} fill={item.pinned ? "currentColor" : "none"} /></button><button onClick={() => window.assistant.clipboard.copy(item.text)}><Clipboard size={15} /></button></>} />)} {!items.length && <Empty text="Clipboard history appears here, except sensitive-looking content." />}</Panel></section>;
 }
 
+function DiscordReminderBackendPanel({ data, setData }: { data: AppData; setData: React.Dispatch<React.SetStateAction<AppData>> }) {
+  const [settings, setSettings] = useState<AppSettings>(data.settings);
+  const [token, setToken] = useState("");
+  const [status, setStatus] = useState<DiscordStatus | null>(null);
+  const [message, setMessage] = useState("");
+  useEffect(() => setSettings(data.settings), [data.settings]);
+  useEffect(() => {
+    window.assistant.discord.status().then(setStatus).catch((error) => setMessage(error instanceof Error ? error.message : String(error)));
+  }, []);
+  async function saveBackend() {
+    try {
+      const next = await window.assistant.settings.save(settings);
+      setData(next);
+      if (token.trim()) await window.assistant.discord.saveToken(token);
+      setToken("");
+      setStatus(await window.assistant.discord.status());
+      setMessage("Discord reminder backend settings saved.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    }
+  }
+  async function testDm() {
+    const result = await window.assistant.discord.testDm(token || undefined);
+    setData(result.data);
+    setStatus(await window.assistant.discord.status());
+    setMessage(result.ok ? "Test DM sent from the VPS bot." : `Test DM failed: ${result.error}`);
+  }
+  async function syncNow() {
+    try {
+      const next = await window.assistant.discord.sync();
+      setData(next);
+      setStatus(await window.assistant.discord.status());
+      setMessage("Reminders synced with the VPS backend.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    }
+  }
+  return (
+    <Panel title="Discord Reminder Delivery">
+      <div className="form">
+        <Row title={status?.configured ? "VPS backend connected" : "VPS backend needs setup"} meta={`DM target: ${settings.discord.targetUserId || "203025242753335296"}`} />
+        <label><input type="checkbox" checked={settings.discord.enabled} onChange={(event) => setSettings({ ...settings, discord: { ...settings.discord, enabled: event.target.checked } })} /> Enable Discord reminder DMs</label>
+        <label><input type="checkbox" checked={settings.discord.syncEnabled} onChange={(event) => setSettings({ ...settings, discord: { ...settings.discord, syncEnabled: event.target.checked } })} /> Sync reminders with VPS</label>
+        <input value={settings.discord.backendUrl} onChange={(event) => setSettings({ ...settings, discord: { ...settings.discord, backendUrl: event.target.value } })} placeholder="Backend URL, e.g. http://15.204.119.230/reminders" />
+        <input type="password" value={token} onChange={(event) => setToken(event.target.value)} placeholder="Backend API token from BOT_API_TOKEN" />
+        <input value={settings.discord.targetUserId} onChange={(event) => setSettings({ ...settings, discord: { ...settings.discord, targetUserId: event.target.value } })} placeholder="Discord user ID" />
+        <div className="quick-actions"><button onClick={saveBackend}><Save size={16} /> Save backend</button><button onClick={testDm}><Bell size={16} /> Test DM</button><button onClick={syncNow}><RotateCcw size={16} /> Sync now</button></div>
+        {message && <small>{message}</small>}
+        <small>The Discord bot token stays on the VPS. This app only stores the backend URL and API token.</small>
+      </div>
+    </Panel>
+  );
+}
+
 function RemindersView({ data, setData }: { data: AppData; setData: React.Dispatch<React.SetStateAction<AppData>> }) {
   const [filter, setFilter] = useState("today");
   const [sort, setSort] = useState("time");
@@ -986,6 +1040,7 @@ function RemindersView({ data, setData }: { data: AppData; setData: React.Dispat
       <div className="reminder-summary">
         {(["today", "upcoming", "overdue", "completed", "dismissed", "all"] as const).map((key) => <button key={key} className={filter === key ? "active" : ""} onClick={() => setFilter(key)}><strong>{counts[key]}</strong><span>{key}</span></button>)}
       </div>
+      <DiscordReminderBackendPanel data={data} setData={setData} />
       <div className="reminder-composer">
         <Panel title={draft.id && data.reminders.some((item) => item.id === draft.id) ? "Edit Reminder" : "Add Reminder"}>
           <div className="reminder-form-grid">
