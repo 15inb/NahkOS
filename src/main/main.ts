@@ -619,13 +619,13 @@ function parsePresentMonCsv(raw: string) {
   return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length);
 }
 
-async function presentMonFps(active: NonNullable<Awaited<ReturnType<typeof entertainmentSnapshot>>["activeSession"]>, settings: AppSettings["monitoring"]) {
+async function presentMonFps(active: NonNullable<Awaited<ReturnType<typeof entertainmentSnapshot>>["activeSession"]>, settings: AppSettings["monitoring"], pid?: number) {
   if (!settings.enablePresentMonFps) return null;
   const nowMs = Date.now();
   if (lastPresentMonFps?.executable === active.executable && nowMs - lastPresentMonFps.at < 12_000) {
     return lastPresentMonFps.value;
   }
-  const executablePath = settings.presentMonExecutablePath || await detectExecutable("PresentMon.exe");
+  const executablePath = settings.presentMonExecutablePath || await detectPresentMonExecutable();
   if (!executablePath) {
     lastPresentMonFps = { executable: active.executable, value: null, at: nowMs, error: "PresentMon.exe not found in PATH or settings" };
     return null;
@@ -633,10 +633,20 @@ async function presentMonFps(active: NonNullable<Awaited<ReturnType<typeof enter
   const processName = path.basename(active.path || `${active.executable}.exe`);
   const output = path.join(app.getPath("temp"), `nahkriinos-presentmon-${process.pid}-${Date.now()}.csv`);
   try {
-    await execFileAsync(executablePath, ["--process_name", processName, "--output_file", output, "--timed", "2", "--terminate_after_timed", "--exclude_dropped", "--v1_metrics"], { timeout: 8000, windowsHide: true, maxBuffer: 1024 * 1024 });
+    const targetArgs = Number.isFinite(pid) && pid ? ["--process_id", String(pid)] : ["--process_name", processName];
+    await execFileAsync(executablePath, [
+      "--session_name", "NahkriinOS-FPS",
+      "--stop_existing_session",
+      ...targetArgs,
+      "--output_file", output,
+      "--timed", "2",
+      "--terminate_after_timed",
+      "--exclude_dropped",
+      "--v1_metrics"
+    ], { timeout: 9000, windowsHide: true, maxBuffer: 1024 * 1024 });
     const raw = fs.existsSync(output) ? fs.readFileSync(output, "utf8") : "";
     const value = parsePresentMonCsv(raw);
-    lastPresentMonFps = { executable: active.executable, value, at: Date.now() };
+    lastPresentMonFps = { executable: active.executable, value, at: Date.now(), error: value === null ? `PresentMon ran but captured no FPS frames for ${pid ? `PID ${pid}` : processName}. Try running NahkriinOS as administrator if the game is elevated or protected.` : undefined };
     return value;
   } catch (error) {
     lastPresentMonFps = { executable: active.executable, value: null, at: Date.now(), error: error instanceof Error ? error.message : String(error) };
@@ -646,11 +656,38 @@ async function presentMonFps(active: NonNullable<Awaited<ReturnType<typeof enter
   }
 }
 
-async function currentGameFps(active: NonNullable<Awaited<ReturnType<typeof entertainmentSnapshot>>["activeSession"]>, settings: AppSettings["monitoring"]) {
+async function detectPresentMonExecutable() {
+  const fromPath = (await detectExecutable("PresentMon.exe")) || (await detectExecutable("PresentMon-2.4.1-x64.exe")) || (await detectExecutable("PresentMon_x64.exe"));
+  if (fromPath) return fromPath;
+  const candidates = [
+    path.join(process.env.ProgramFiles || "C:\\Program Files", "Intel", "PresentMon", "PresentMonConsoleApplication"),
+    path.join(process.env.ProgramFiles || "C:\\Program Files", "Intel", "PresentMon", "PresentMonApplication"),
+    path.join(process.env.ProgramFiles || "C:\\Program Files", "NVIDIA Corporation", "FrameViewSDK", "bin"),
+    path.join(process.env.ProgramData || "C:\\ProgramData", "NVIDIA Corporation", "Downloader", "latest", "FrameViewSDK", "bin")
+  ];
+  for (const folder of candidates) {
+    try {
+      const entries = fs.readdirSync(folder, { withFileTypes: true })
+        .filter((entry) => entry.isFile() && /^PresentMon.*\.exe$/i.test(entry.name))
+        .map((entry) => path.join(folder, entry.name))
+        .sort((a, b) => {
+          const aConsole = /ConsoleApplication/i.test(a) ? 1 : 0;
+          const bConsole = /ConsoleApplication/i.test(b) ? 1 : 0;
+          return bConsole - aConsole || b.length - a.length;
+        });
+      if (entries[0]) return entries[0];
+    } catch {
+      // Ignore inaccessible optional install locations.
+    }
+  }
+  return "";
+}
+
+async function currentGameFps(active: NonNullable<Awaited<ReturnType<typeof entertainmentSnapshot>>["activeSession"]>, settings: AppSettings["monitoring"], pid?: number) {
   const titleValue = fpsFromTitle(active.title);
   if (titleValue !== null) return { fps: titleValue, source: "window-title" as const };
   if (lastExternalFps && Date.now() - lastExternalFps.at < 8000) return { fps: lastExternalFps.value, source: "external" as const };
-  const pm = await presentMonFps(active, settings);
+  const pm = await presentMonFps(active, settings, pid);
   if (pm !== null) return { fps: pm, source: "presentmon" as const };
   return { fps: null, source: "unavailable" as const };
 }
@@ -670,7 +707,8 @@ async function sampleGamePerformance() {
     return;
   }
   const snapshot = await getLightSystemSnapshot(data.settings.monitoring.maxHistoryPoints || 360);
-  const fps = await currentGameFps(active, data.settings.monitoring);
+  const activeDetected = entertainment?.detected.find((item) => item.profile === "gaming" && (item.executable === active.executable || item.path === active.path || item.title === active.title));
+  const fps = await currentGameFps(active, data.settings.monitoring, activeDetected?.pid);
   const sample: GamePerformanceSample = {
     time: snapshot.capturedAt,
     fps: fps.fps,
@@ -1138,8 +1176,8 @@ function wireIpc() {
     sessions: (await store.read()).gamePerformanceSessions,
     detected: latestEntertainmentDetected(),
     fpsStatus: {
-      presentMonAvailable: Boolean((await store.read()).settings.monitoring.presentMonExecutablePath) || Boolean(await detectExecutable("PresentMon.exe")),
-      presentMonPath: (await store.read()).settings.monitoring.presentMonExecutablePath || await detectExecutable("PresentMon.exe"),
+      presentMonAvailable: Boolean((await store.read()).settings.monitoring.presentMonExecutablePath) || Boolean(await detectPresentMonExecutable()),
+      presentMonPath: (await store.read()).settings.monitoring.presentMonExecutablePath || await detectPresentMonExecutable(),
       lastPresentMonError: lastPresentMonFps?.error,
       externalFpsFresh: Boolean(lastExternalFps && Date.now() - lastExternalFps.at < 8000)
     }
