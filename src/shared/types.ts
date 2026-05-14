@@ -238,6 +238,9 @@ export interface MonitoringSettings {
   ramAlertPercent: number;
   storageAlertPercent: number;
   networkAlertMbps: number;
+  storageTimelineRetentionDays: number;
+  gamePerformanceTrackingEnabled: boolean;
+  gamePerformanceSampleMs: number;
   enableAlerts: boolean;
   enableOverlay: boolean;
   overlayMode: "compact" | "expanded";
@@ -309,6 +312,8 @@ export interface AppData {
   projects: ProjectEntry[];
   aiConversation: AiConversation;
   storageScanLocations: StorageScanLocation[];
+  storageTimelineSnapshots: StorageTimelineSnapshot[];
+  gamePerformanceSessions: GamePerformanceSession[];
   stressTestHistory: StressTestResult[];
   entertainmentActivities: EntertainmentActivity[];
   entertainmentRecommendations: EntertainmentRecommendation[];
@@ -439,6 +444,87 @@ export interface AiStorageRecommendation {
   priority: "low" | "medium" | "high";
   sourcePaths: string[];
   risk: string;
+}
+
+export interface AiDiagnosisReport {
+  id: string;
+  kind: "pc-slow" | "storage-timeline" | "fps-drop";
+  createdAt: string;
+  content: string;
+  sources: string[];
+  contextSummary: string;
+}
+
+export interface StorageTimelineSnapshot {
+  id: string;
+  scanId: string;
+  capturedAt: string;
+  targetPath: string;
+  targetType: "drive" | "folder";
+  scannedBytes: number;
+  scannedFiles: number;
+  scannedFolders: number;
+  topFolders: Array<{ path: string; name: string; size: number; safety: StorageSafety; modifiedAt: string }>;
+  topFiles: Array<{ path: string; name: string; size: number; safety: StorageSafety; modifiedAt: string; extension: string }>;
+  typeBreakdown: StorageTypeBreakdown[];
+  skippedProtectedCount: number;
+}
+
+export interface StorageTimelineEvent {
+  id: string;
+  kind: "growth" | "shrinkage" | "new-large-file" | "removed-large-file" | "category-growth" | "category-shrinkage";
+  title: string;
+  path?: string;
+  category?: string;
+  deltaBytes: number;
+  previousBytes: number;
+  currentBytes: number;
+  capturedAt: string;
+  safety: StorageSafety | "unknown";
+}
+
+export interface StorageTimeline {
+  snapshots: StorageTimelineSnapshot[];
+  events: StorageTimelineEvent[];
+  totals: Array<{ capturedAt: string; scannedBytes: number; targetPath: string }>;
+}
+
+export interface GamePerformanceSample {
+  time: string;
+  fps: number | null;
+  cpuUsage: number;
+  gpuUsage: number | null;
+  cpuTemp: number | null;
+  gpuTemp: number | null;
+  ramPercent: number;
+  vramPercent: number | null;
+  diskReadBps: number;
+  diskWriteBps: number;
+  networkRxBps: number;
+  networkTxBps: number;
+}
+
+export interface GamePerformanceSession {
+  id: string;
+  title: string;
+  appName: string;
+  executable: string;
+  startedAt: string;
+  endedAt?: string;
+  durationSeconds: number;
+  samples: GamePerformanceSample[];
+  summary: {
+    averageFps: number | null;
+    minFps: number | null;
+    averageCpu: number;
+    peakCpu: number;
+    averageGpu: number | null;
+    peakGpu: number | null;
+    peakRamPercent: number;
+    peakVramPercent: number | null;
+    peakCpuTemp: number | null;
+    peakGpuTemp: number | null;
+  };
 }
 
 export interface CommandRunResult {

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { AiChatRequest, AiContextPreview, AiConversation, AiStatus, AiStorageRecommendation, AiStreamEvent, AppData, AppSettings, CodexPromptTemplate, CodexRunRequest, CodexSession, CommandItem, DiscordStatus, DiskBenchmarkResult, EntertainmentRecommendation, EntertainmentSnapshot, LightSystemSnapshot, MonitoringSettings, NoteItem, PerformanceDiagnostics, ReminderItem, StorageAnalysis, StorageScanOptions, StorageScanResult, StorageScanStatus, StorageScanTarget, StressTestOptions, StressTestSession, SystemSnapshot, SystemSnapshotOptions, UpdateCheckResult, WatchingModeStatus } from "../shared/types.js";
+import type { AiChatRequest, AiContextPreview, AiConversation, AiDiagnosisReport, AiStatus, AiStorageRecommendation, AiStreamEvent, AppData, AppSettings, CodexPromptTemplate, CodexRunRequest, CodexSession, CommandItem, DiscordStatus, DiskBenchmarkResult, EntertainmentRecommendation, EntertainmentSnapshot, GamePerformanceSession, LightSystemSnapshot, MonitoringSettings, NoteItem, PerformanceDiagnostics, ReminderItem, StorageAnalysis, StorageScanOptions, StorageScanResult, StorageScanStatus, StorageScanTarget, StorageTimeline, StressTestOptions, StressTestSession, SystemSnapshot, SystemSnapshotOptions, UpdateCheckResult, WatchingModeStatus } from "../shared/types.js";
 
 const api = {
   onOpenCommandPalette: (callback: () => void) => {
@@ -49,7 +49,11 @@ const api = {
     cancel: (requestId: string): Promise<boolean> => ipcRenderer.invoke("ai:cancel", requestId),
     clearChat: (): Promise<AppData> => ipcRenderer.invoke("ai:clearChat"),
     exportChat: (): Promise<string> => ipcRenderer.invoke("ai:exportChat"),
-    storageRecommendations: (): Promise<AiStorageRecommendation[]> => ipcRenderer.invoke("ai:storageRecommendations")
+    exportDiagnosis: (report: AiDiagnosisReport): Promise<string> => ipcRenderer.invoke("ai:exportDiagnosis", report),
+    storageRecommendations: (): Promise<AiStorageRecommendation[]> => ipcRenderer.invoke("ai:storageRecommendations"),
+    diagnoseSlowPc: (): Promise<AiDiagnosisReport> => ipcRenderer.invoke("ai:diagnoseSlowPc"),
+    explainStorageTimeline: (): Promise<AiDiagnosisReport> => ipcRenderer.invoke("ai:explainStorageTimeline"),
+    analyzeFpsDrop: (sessionId?: string): Promise<AiDiagnosisReport> => ipcRenderer.invoke("ai:analyzeFpsDrop", sessionId)
   },
   commands: {
     save: (command: CommandItem): Promise<AppData> => ipcRenderer.invoke("commands:save", command),
@@ -113,6 +117,7 @@ const api = {
     status: (): Promise<EntertainmentSnapshot> => ipcRenderer.invoke("entertainment:status"),
     recommendations: (): Promise<EntertainmentRecommendation[]> => ipcRenderer.invoke("entertainment:recommendations"),
     clear: (): Promise<AppData> => ipcRenderer.invoke("entertainment:clear"),
+    gamePerformance: (): Promise<{ active: GamePerformanceSession | null; sessions: GamePerformanceSession[] }> => ipcRenderer.invoke("entertainment:gamePerformance"),
     watchingStatus: (): Promise<WatchingModeStatus> => ipcRenderer.invoke("entertainment:watchingStatus"),
     previewDimming: (): Promise<number[]> => ipcRenderer.invoke("entertainment:previewDimming")
   },
@@ -132,6 +137,8 @@ const api = {
     storageTargets: (): Promise<StorageScanTarget[]> => ipcRenderer.invoke("system:storageTargets"),
     startStorageScan: (options: StorageScanOptions): Promise<StorageScanResult> => ipcRenderer.invoke("system:storageScanStart", options),
     storageScanStatus: (): Promise<StorageScanStatus> => ipcRenderer.invoke("system:storageScanStatus"),
+    storageTimeline: (): Promise<StorageTimeline> => ipcRenderer.invoke("system:storageTimeline"),
+    clearStorageTimeline: (): Promise<AppData> => ipcRenderer.invoke("system:storageTimelineClear"),
     cancelStorageScan: (): Promise<StorageScanResult | null> => ipcRenderer.invoke("system:storageScanCancel"),
     pauseStorageScan: (): Promise<StorageScanResult | null> => ipcRenderer.invoke("system:storageScanPause"),
     resumeStorageScan: (): Promise<StorageScanResult | null> => ipcRenderer.invoke("system:storageScanResume"),

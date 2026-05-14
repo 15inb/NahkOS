@@ -41,6 +41,9 @@ const defaultSettings: AppSettings = {
     ramAlertPercent: 90,
     storageAlertPercent: 90,
     networkAlertMbps: 100,
+    storageTimelineRetentionDays: 90,
+    gamePerformanceTrackingEnabled: true,
+    gamePerformanceSampleMs: 5000,
     enableAlerts: true,
     enableOverlay: false,
     overlayMode: "compact",
@@ -181,6 +184,8 @@ const defaultData = (): AppData => ({
   projects: [],
   aiConversation: { messages: [], updatedAt: now() },
   storageScanLocations: [],
+  storageTimelineSnapshots: [],
+  gamePerformanceSessions: [],
   stressTestHistory: [],
   entertainmentActivities: [],
   entertainmentRecommendations: []
@@ -243,6 +248,8 @@ export class JsonStore {
         })),
         aiConversation: parsed.aiConversation ?? { messages: [], updatedAt: now() },
         storageScanLocations: parsed.storageScanLocations ?? [],
+        storageTimelineSnapshots: parsed.storageTimelineSnapshots ?? [],
+        gamePerformanceSessions: parsed.gamePerformanceSessions ?? [],
         stressTestHistory: parsed.stressTestHistory ?? [],
         entertainmentActivities: parsed.entertainmentActivities ?? [],
         entertainmentRecommendations: parsed.entertainmentRecommendations ?? []

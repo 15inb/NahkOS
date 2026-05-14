@@ -4,8 +4,8 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import type { AiChatRequest, AppData, AppSettings, CodexPromptTemplate, CommandItem, NoteItem, PerformanceDiagnostics, ReminderItem, StressTestResult, SystemSnapshotOptions, UpdateCheckResult, UpdateInfo, WatchingModeStatus } from "../shared/types.js";
-import { aiStatus, cancelAiRequest, clearAiConversation, exportAiConversation, generateStorageRecommendations, getAiConversation, previewAiContext, sendAiMessage, testOpenAiKey } from "./services/ai.js";
+import type { AiChatRequest, AppData, AppSettings, CodexPromptTemplate, CommandItem, GamePerformanceSample, GamePerformanceSession, NoteItem, PerformanceDiagnostics, ReminderItem, StorageScanResult, StorageTimeline, StorageTimelineEvent, StorageTimelineSnapshot, StressTestResult, SystemSnapshotOptions, UpdateCheckResult, UpdateInfo, WatchingModeStatus } from "../shared/types.js";
+import { aiStatus, analyzeFpsDrop, cancelAiRequest, clearAiConversation, diagnosePcSlow, explainStorageTimeline, exportAiConversation, generateStorageRecommendations, getAiConversation, previewAiContext, sendAiMessage, testOpenAiKey } from "./services/ai.js";
 import { startClipboardWatcher } from "./services/clipboard.js";
 import { cancelCodexSession, codexAvailability, codexPromptNeedsConfirmation, runCodexSession } from "./services/codex.js";
 import { executeCommand } from "./services/commands.js";
@@ -36,6 +36,8 @@ let watchingModeTimer: NodeJS.Timeout | null = null;
 let watchingStatus: WatchingModeStatus = { active: false, reason: "Not checked yet", playbackDisplayId: null, playbackDisplayLabel: "", fullscreen: false, dimmedDisplayIds: [] };
 const reminderTimers = new Map<string, NodeJS.Timeout>();
 let reminderSyncTimer: NodeJS.Timeout | null = null;
+let gamePerfTimer: NodeJS.Timeout | null = null;
+let activeGamePerf: GamePerformanceSession | null = null;
 let lastPerfCpu = process.cpuUsage();
 let lastPerfAt = process.hrtime.bigint();
 
@@ -45,6 +47,13 @@ function fallbackHtml(title: string, body: string) {
     main{max-width:720px;border:1px solid #263240;background:#111821;border-radius:8px;padding:28px;box-shadow:0 24px 80px rgba(0,0,0,.35)}
     h1{margin:0 0 12px;font-size:24px}p{color:#9fb0bd;line-height:1.5}code{color:#2dd4bf}
   </style></head><body><main><h1>${title}</h1><p>${body}</p><p>Startup log: <code>${getLogFile()}</code></p></main></body></html>`;
+}
+
+function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const index = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+  return `${(bytes / 1024 ** index).toFixed(index ? 1 : 0)} ${units[index]}`;
 }
 
 async function createWindow() {
@@ -494,6 +503,137 @@ async function saveStressResult(result: StressTestResult | null) {
   }));
 }
 
+function storageTimelineSnapshot(result: StorageScanResult): StorageTimelineSnapshot {
+  return {
+    id: crypto.randomUUID(),
+    scanId: result.id,
+    capturedAt: result.finishedAt || new Date().toISOString(),
+    targetPath: result.targetPath || result.roots[0] || "",
+    targetType: result.targetType,
+    scannedBytes: result.scannedBytes,
+    scannedFiles: result.scannedFiles,
+    scannedFolders: result.scannedFolders,
+    topFolders: result.largestFolders.slice(0, 40).map((item) => ({ path: item.path, name: item.name, size: item.size, safety: item.safety, modifiedAt: item.modifiedAt })),
+    topFiles: result.largestFiles.slice(0, 40).map((item) => ({ path: item.path, name: item.name, size: item.size, safety: item.safety, modifiedAt: item.modifiedAt, extension: item.extension })),
+    typeBreakdown: result.typeBreakdown.slice(0, 24),
+    skippedProtectedCount: result.skipped.filter((item) => item.protected).length
+  };
+}
+
+async function recordStorageTimelineSnapshot(result: StorageScanResult | null) {
+  if (!result || result.status !== "completed") return;
+  await store.patch((data) => {
+    if (data.storageTimelineSnapshots.some((item) => item.scanId === result.id)) return data;
+    const cutoff = Date.now() - (data.settings.monitoring.storageTimelineRetentionDays || 90) * 24 * 60 * 60 * 1000;
+    return {
+      ...data,
+      storageTimelineSnapshots: [storageTimelineSnapshot(result), ...data.storageTimelineSnapshots]
+        .filter((item) => new Date(item.capturedAt).getTime() >= cutoff)
+        .slice(0, 120)
+    };
+  });
+}
+
+function buildStorageTimeline(data: AppData): StorageTimeline {
+  const snapshots = data.storageTimelineSnapshots.slice().sort((a, b) => a.capturedAt.localeCompare(b.capturedAt));
+  const events: StorageTimelineEvent[] = [];
+  for (let index = 1; index < snapshots.length; index += 1) {
+    const previous = snapshots[index - 1];
+    const current = snapshots[index];
+    if (previous.targetPath.toLowerCase() !== current.targetPath.toLowerCase()) continue;
+    const folderMap = new Map(previous.topFolders.map((item) => [item.path.toLowerCase(), item]));
+    for (const folder of current.topFolders.slice(0, 20)) {
+      const before = folderMap.get(folder.path.toLowerCase());
+      const delta = folder.size - (before?.size ?? 0);
+      if (Math.abs(delta) >= 512 * 1024 ** 2) {
+        events.push({ id: crypto.randomUUID(), kind: delta > 0 ? "growth" : "shrinkage", title: `${folder.name} ${delta > 0 ? "grew" : "shrank"} by ${formatBytes(Math.abs(delta))}`, path: folder.path, deltaBytes: delta, previousBytes: before?.size ?? 0, currentBytes: folder.size, capturedAt: current.capturedAt, safety: folder.safety });
+      }
+    }
+    const fileMap = new Map(previous.topFiles.map((item) => [item.path.toLowerCase(), item]));
+    for (const file of current.topFiles.slice(0, 20)) {
+      if (!fileMap.has(file.path.toLowerCase()) && file.size >= 1024 ** 3) {
+        events.push({ id: crypto.randomUUID(), kind: "new-large-file", title: `New large file: ${file.name}`, path: file.path, deltaBytes: file.size, previousBytes: 0, currentBytes: file.size, capturedAt: current.capturedAt, safety: file.safety });
+      }
+    }
+    const typeMap = new Map(previous.typeBreakdown.map((item) => [item.type, item]));
+    for (const type of current.typeBreakdown.slice(0, 12)) {
+      const before = typeMap.get(type.type);
+      const delta = type.size - (before?.size ?? 0);
+      if (Math.abs(delta) >= 1024 ** 3) {
+        events.push({ id: crypto.randomUUID(), kind: delta > 0 ? "category-growth" : "category-shrinkage", title: `${type.type} ${delta > 0 ? "increased" : "decreased"} by ${formatBytes(Math.abs(delta))}`, category: type.type, deltaBytes: delta, previousBytes: before?.size ?? 0, currentBytes: type.size, capturedAt: current.capturedAt, safety: "unknown" });
+      }
+    }
+  }
+  return { snapshots: snapshots.slice(-30), events: events.sort((a, b) => Math.abs(b.deltaBytes) - Math.abs(a.deltaBytes)).slice(0, 80), totals: snapshots.map((item) => ({ capturedAt: item.capturedAt, scannedBytes: item.scannedBytes, targetPath: item.targetPath })) };
+}
+
+function summarizeGamePerformance(session: GamePerformanceSession): GamePerformanceSession["summary"] {
+  const samples = session.samples;
+  const avg = (values: number[]) => values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length) : 0;
+  const nums = (values: Array<number | null>) => values.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  const fps = nums(samples.map((item) => item.fps));
+  const gpu = nums(samples.map((item) => item.gpuUsage));
+  const vram = nums(samples.map((item) => item.vramPercent));
+  const cpuTemp = nums(samples.map((item) => item.cpuTemp));
+  const gpuTemp = nums(samples.map((item) => item.gpuTemp));
+  return {
+    averageFps: fps.length ? avg(fps) : null,
+    minFps: fps.length ? Math.min(...fps) : null,
+    averageCpu: avg(samples.map((item) => item.cpuUsage)),
+    peakCpu: Math.max(0, ...samples.map((item) => item.cpuUsage)),
+    averageGpu: gpu.length ? avg(gpu) : null,
+    peakGpu: gpu.length ? Math.max(...gpu) : null,
+    peakRamPercent: Math.max(0, ...samples.map((item) => item.ramPercent)),
+    peakVramPercent: vram.length ? Math.max(...vram) : null,
+    peakCpuTemp: cpuTemp.length ? Math.max(...cpuTemp) : null,
+    peakGpuTemp: gpuTemp.length ? Math.max(...gpuTemp) : null
+  };
+}
+
+async function sampleGamePerformance() {
+  const data = await store.read();
+  if (!data.settings.monitoring.gamePerformanceTrackingEnabled) return;
+  const entertainment = await entertainmentSnapshot(store).catch(() => null);
+  const active = entertainment?.activeSession && entertainment.profile === "gaming" ? entertainment.activeSession : null;
+  if (!active) {
+    if (activeGamePerf) {
+      const endedAt = new Date().toISOString();
+      const finished = { ...activeGamePerf, endedAt, durationSeconds: Math.round((new Date(endedAt).getTime() - new Date(activeGamePerf.startedAt).getTime()) / 1000), summary: summarizeGamePerformance(activeGamePerf) };
+      await store.patch((draft) => ({ ...draft, gamePerformanceSessions: [finished, ...draft.gamePerformanceSessions.filter((item) => item.id !== finished.id)].slice(0, 80) }));
+      activeGamePerf = null;
+    }
+    return;
+  }
+  const snapshot = await getLightSystemSnapshot(data.settings.monitoring.maxHistoryPoints || 360);
+  const sample: GamePerformanceSample = {
+    time: snapshot.capturedAt,
+    fps: null,
+    cpuUsage: snapshot.cpu.usage,
+    gpuUsage: snapshot.gpu.usage,
+    cpuTemp: snapshot.cpu.temperature,
+    gpuTemp: snapshot.gpu.temperature,
+    ramPercent: Math.round((snapshot.ram.used / Math.max(snapshot.ram.total, 1)) * 100),
+    vramPercent: snapshot.gpu.vramTotal ? Math.round(((snapshot.gpu.vramUsed ?? 0) / snapshot.gpu.vramTotal) * 100) : null,
+    diskReadBps: snapshot.disks[0]?.readBps ?? 0,
+    diskWriteBps: snapshot.disks[0]?.writeBps ?? 0,
+    networkRxBps: snapshot.network.rxBps,
+    networkTxBps: snapshot.network.txBps
+  };
+  if (!activeGamePerf || activeGamePerf.executable !== active.executable) {
+    activeGamePerf = { id: crypto.randomUUID(), title: active.title, appName: active.appName, executable: active.executable, startedAt: new Date().toISOString(), durationSeconds: 0, samples: [], summary: { averageFps: null, minFps: null, averageCpu: 0, peakCpu: 0, averageGpu: null, peakGpu: null, peakRamPercent: 0, peakVramPercent: null, peakCpuTemp: null, peakGpuTemp: null } };
+  }
+  activeGamePerf.samples = [...activeGamePerf.samples, sample].slice(-720);
+  activeGamePerf.durationSeconds = Math.round((Date.now() - new Date(activeGamePerf.startedAt).getTime()) / 1000);
+  activeGamePerf.summary = summarizeGamePerformance(activeGamePerf);
+}
+
+async function startGamePerformancePoller() {
+  if (gamePerfTimer) clearInterval(gamePerfTimer);
+  const data = await store.read();
+  const interval = Math.max(2000, data.settings.monitoring.gamePerformanceSampleMs || 5000);
+  gamePerfTimer = setInterval(() => void sampleGamePerformance().catch((error) => log("Game performance sampling failed", error instanceof Error ? error.message : String(error))), interval);
+}
+
 function clearReminderTimer(id: string) {
   const timer = reminderTimers.get(id);
   if (timer) clearTimeout(timer);
@@ -692,6 +832,7 @@ function wireIpc() {
     app.setLoginItemSettings({ openAtLogin: settings.launchAtStartup });
     await registerShortcut();
     await refreshOverlaySettings();
+    await startGamePerformancePoller();
     return data;
   });
 
@@ -721,6 +862,19 @@ function wireIpc() {
   ipcMain.handle("ai:clearChat", () => clearAiConversation(store));
   ipcMain.handle("ai:exportChat", () => exportAiConversation(store));
   ipcMain.handle("ai:storageRecommendations", () => generateStorageRecommendations(store));
+  ipcMain.handle("ai:exportDiagnosis", async (_event, report) => {
+    const file = path.join(app.getPath("documents"), `NahkriinOS-${String(report.kind || "AI-Report")}-${Date.now()}.md`);
+    await fs.promises.writeFile(file, String(report.content || ""), "utf8");
+    shell.showItemInFolder(file);
+    return file;
+  });
+  ipcMain.handle("ai:diagnoseSlowPc", () => diagnosePcSlow(store));
+  ipcMain.handle("ai:explainStorageTimeline", async () => explainStorageTimeline(store, buildStorageTimeline(await store.read())));
+  ipcMain.handle("ai:analyzeFpsDrop", async (_event, sessionId?: string) => {
+    const data = await store.read();
+    const session = data.gamePerformanceSessions.find((item) => item.id === sessionId) ?? activeGamePerf ?? data.gamePerformanceSessions[0] ?? null;
+    return analyzeFpsDrop(store, session);
+  });
 
   ipcMain.handle("commands:save", async (_event, command: CommandItem) =>
     store.patch((data) => ({ ...data, commands: upsertById(data.commands, command) }))
@@ -912,6 +1066,7 @@ function wireIpc() {
   ipcMain.handle("entertainment:status", () => entertainmentSnapshot(store));
   ipcMain.handle("entertainment:recommendations", () => generateEntertainmentRecommendations(store));
   ipcMain.handle("entertainment:clear", () => clearEntertainmentHistory(store));
+  ipcMain.handle("entertainment:gamePerformance", async () => ({ active: activeGamePerf, sessions: (await store.read()).gamePerformanceSessions }));
   ipcMain.handle("entertainment:watchingStatus", () => watchingStatus);
   ipcMain.handle("entertainment:previewDimming", async () => {
     const data = await store.read();
@@ -951,7 +1106,13 @@ function wireIpc() {
     if (result.targetPath) await store.patch((data) => upsertStorageScanLocation(data, result.targetPath, result.targetType));
     return result;
   });
-  ipcMain.handle("system:storageScanStatus", () => storageScanStatus());
+  ipcMain.handle("system:storageScanStatus", async () => {
+    const status = await storageScanStatus();
+    await recordStorageTimelineSnapshot(status.result ?? status.cached);
+    return status;
+  });
+  ipcMain.handle("system:storageTimeline", async () => buildStorageTimeline(await store.read()));
+  ipcMain.handle("system:storageTimelineClear", () => store.patch((data) => ({ ...data, storageTimelineSnapshots: [] })));
   ipcMain.handle("system:storageScanCancel", () => cancelStorageScan());
   ipcMain.handle("system:storageScanPause", () => pauseStorageScan());
   ipcMain.handle("system:storageScanResume", () => resumeStorageScan());
@@ -996,6 +1157,7 @@ app.whenReady().then(async () => {
   await registerShortcut();
   await refreshOverlaySettings();
   startWatchingModePoller();
+  await startGamePerformancePoller();
   await syncRemindersAndNotifyRenderer().catch((error) => log("Initial reminder sync failed", error instanceof Error ? error.message : String(error)));
   startReminderSyncPoller();
   await scheduleAllReminders();
@@ -1013,6 +1175,7 @@ app.on("before-quit", () => {
   globalShortcut.unregisterAll();
   if (clipboardTimer) clearInterval(clipboardTimer);
   if (watchingModeTimer) clearInterval(watchingModeTimer);
+  if (gamePerfTimer) clearInterval(gamePerfTimer);
   if (reminderSyncTimer) clearInterval(reminderSyncTimer);
   reminderTimers.forEach((timer) => clearTimeout(timer));
   overlayWindow?.destroy();

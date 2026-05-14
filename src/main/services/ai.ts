@@ -2,7 +2,7 @@ import type { WebContents } from "electron";
 import { app } from "electron";
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { AiChatMessage, AiChatRequest, AiContextPreview, AiStatus, AiStorageRecommendation, AppData, ProcessInfo, StorageScanItem, StorageScanResult, SystemSnapshot } from "../../shared/types.js";
+import type { AiChatMessage, AiChatRequest, AiContextPreview, AiDiagnosisReport, AiStatus, AiStorageRecommendation, AppData, GamePerformanceSession, ProcessInfo, StorageScanItem, StorageScanResult, StorageTimeline, SystemSnapshot } from "../../shared/types.js";
 import { entertainmentSnapshot } from "./entertainment.js";
 import { JsonStore } from "./storage.js";
 import { getSystemSnapshot, storageScanStatus } from "./system.js";
@@ -451,4 +451,103 @@ export async function generateStorageRecommendations(store: JsonStore): Promise<
   const json = await response.json() as any;
   const text = json.output_text ?? json.output?.flatMap((item: any) => item.content ?? []).map((item: any) => item.text ?? "").join("\n") ?? "";
   return parseRecommendations(text);
+}
+
+function extractResponseText(json: any) {
+  return json.output_text ?? json.output?.flatMap((item: any) => item.content ?? []).map((item: any) => item.text ?? "").join("\n") ?? "";
+}
+
+async function runFocusedAiReport(store: JsonStore, kind: AiDiagnosisReport["kind"], instructions: string, payload: unknown, sources: string[], maxOutput = 1200): Promise<AiDiagnosisReport> {
+  const data = await store.read();
+  const apiKey = await store.getOpenAiApiKey();
+  if (!apiKey) throw new Error("OpenAI is not configured. Add an API key in Settings before running this AI diagnosis.");
+  const response = await callResponsesApi(apiKey, {
+    model: data.settings.ai.model,
+    max_output_tokens: maxOutput,
+    instructions: `${systemPrompt("advanced")}\n${instructions}`,
+    input: [
+      "NahkriinOS compact diagnostic payload:",
+      JSON.stringify(payload),
+      "",
+      data.settings.ai.previewContext ? "User has enabled context preview in settings. Keep the Data Used section explicit." : "Use summarized local context only."
+    ].join("\n")
+  });
+  if (!response.ok) throw new Error(friendlyOpenAiError(response.status, await response.text()));
+  const json = await response.json();
+  return {
+    id: crypto.randomUUID(),
+    kind,
+    createdAt: now(),
+    content: extractResponseText(json).trim() || "OpenAI returned an empty response.",
+    sources,
+    contextSummary: sources.join(", ")
+  };
+}
+
+export async function diagnosePcSlow(store: JsonStore): Promise<AiDiagnosisReport> {
+  const data = await store.read();
+  const [snapshot, scanStatus] = await Promise.all([
+    getSystemSnapshot(data.settings.monitoring.historyLimit, { includeProcesses: true, includeStartup: true }),
+    storageScanStatus().catch(() => ({ active: false, result: null, cached: null }))
+  ]);
+  const ramPercent = Math.round((snapshot.ram.used / Math.max(snapshot.ram.total, 1)) * 100);
+  const topCpu = snapshot.processes.slice(0, 10);
+  const topRam = snapshot.processes.slice().sort((a, b) => b.memory - a.memory).slice(0, 10);
+  const payload = {
+    capturedAt: snapshot.capturedAt,
+    cpu: { usage: snapshot.cpu.usage, temperature: snapshot.cpu.temperature, clockMHz: snapshot.cpu.clockMHz, topProcesses: compactProcesses(topCpu, data.settings.ai.privacy.processNames) },
+    ram: { percent: ramPercent, usedLabel: formatBytes(snapshot.ram.used), totalLabel: formatBytes(snapshot.ram.total), topProcesses: compactProcesses(topRam, data.settings.ai.privacy.processNames) },
+    gpu: snapshot.gpu,
+    disk: snapshot.disks.map((disk) => ({ name: disk.name, usedPercent: Math.round((disk.used / Math.max(disk.total, 1)) * 100), freeLabel: formatBytes(disk.total - disk.used), readBps: disk.readBps, writeBps: disk.writeBps })),
+    network: snapshot.network,
+    startup: snapshot.startup.slice(0, 15),
+    uptimeSeconds: snapshot.uptime,
+    alerts: snapshot.alerts,
+    storageScan: scanStatus.result ?? scanStatus.cached ? { active: scanStatus.active, target: (scanStatus.result ?? scanStatus.cached)?.targetPath, status: (scanStatus.result ?? scanStatus.cached)?.status } : null,
+    nahkriinosWorkload: { storageScanActive: scanStatus.active, overlayEnabled: data.settings.monitoring.enableOverlay, lowPowerMode: data.settings.monitoring.lowPowerMode },
+    missingData: ["Recent Windows event logs and crash logs are not collected in this MVP unless future permissions are added."]
+  };
+  return runFocusedAiReport(store, "pc-slow", [
+    "Answer the user's implicit question: Why does my PC feel slow right now?",
+    "Use exactly these Markdown sections: ## Summary, ## Most Likely Causes, ## What To Do First, ## Risk Level, ## Data Used.",
+    "Be practical and consumer-friendly. Do not tell the user to kill processes or disable startup apps without review."
+  ].join("\n"), payload, ["CPU", "RAM", "GPU", "Disk", "Processes", "Network", "Startup Apps", "NahkriinOS workload"]);
+}
+
+export async function explainStorageTimeline(store: JsonStore, timeline: StorageTimeline): Promise<AiDiagnosisReport> {
+  const payload = {
+    snapshots: timeline.snapshots.slice(-8),
+    events: timeline.events.slice(0, 30),
+    privacyNote: "Windows protected/system locations remain excluded unless explicitly scanned."
+  };
+  return runFocusedAiReport(store, "storage-timeline", [
+    "Explain storage growth/shrinkage over time from these storage scan snapshots.",
+    "Use Markdown sections: ## Summary, ## Biggest Changes, ## Likely Causes, ## Recommended Review, ## Data Used.",
+    "Never recommend deleting Windows-critical or protected system folders."
+  ].join("\n"), payload, ["Storage scans", "Largest folders", "Largest files", "File type breakdown"]);
+}
+
+export async function analyzeFpsDrop(store: JsonStore, session: GamePerformanceSession | null): Promise<AiDiagnosisReport> {
+  const snapshot = await getSystemSnapshot(120, { includeProcesses: true });
+  const data = await store.read();
+  const recentSessions = data.gamePerformanceSessions.slice(0, 5);
+  const payload = {
+    selectedSession: session,
+    recentSessions,
+    currentSystem: {
+      cpu: snapshot.cpu,
+      gpu: snapshot.gpu,
+      ramPercent: Math.round((snapshot.ram.used / Math.max(snapshot.ram.total, 1)) * 100),
+      disks: snapshot.disks.map((disk) => ({ name: disk.name, readBps: disk.readBps, writeBps: disk.writeBps })),
+      network: snapshot.network,
+      topProcesses: compactProcesses(snapshot.processes, data.settings.ai.privacy.processNames),
+      overlayEnabled: data.settings.monitoring.enableOverlay
+    },
+    fpsNote: "FPS is only available when NahkriinOS can read an FPS source; otherwise analyze usage, temperatures, memory, disk, and network as proxies."
+  };
+  return runFocusedAiReport(store, "fps-drop", [
+    "Answer: Why did my FPS drop?",
+    "Use exactly these Markdown sections: ## Summary, ## Likely Bottleneck, ## Evidence, ## Recommended Fixes, ## Confidence.",
+    "Discuss thermal throttling, GPU/CPU bottlenecks, RAM/VRAM pressure, disk spikes, network instability, background apps, and overlay impact only when supported by data."
+  ].join("\n"), payload, ["Game session metrics", "CPU", "GPU", "RAM", "VRAM", "Disk", "Network", "Processes"]);
 }
