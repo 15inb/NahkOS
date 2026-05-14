@@ -545,7 +545,10 @@ export async function analyzeFpsDrop(store: JsonStore, session: GamePerformanceS
   const data = await store.read();
   const recentSessions = data.gamePerformanceSessions.slice(0, 5);
   const payload = {
-    selectedSession: session,
+    selectedSession: session ? {
+      ...session,
+      fpsSource: session.summary.fpsSource ?? session.samples.find((sample) => sample.fpsSource && sample.fpsSource !== "unavailable")?.fpsSource ?? "unavailable"
+    } : null,
     recentSessions,
     currentSystem: {
       cpu: snapshot.cpu,
@@ -556,7 +559,7 @@ export async function analyzeFpsDrop(store: JsonStore, session: GamePerformanceS
       topProcesses: compactProcesses(snapshot.processes, data.settings.ai.privacy.processNames),
       overlayEnabled: data.settings.monitoring.enableOverlay
     },
-    fpsNote: "FPS is only available when NahkriinOS can read an FPS source; otherwise analyze usage, temperatures, memory, disk, and network as proxies."
+    fpsNote: "FPS is collected from PresentMon when available, window titles that expose FPS, or an external overlay source. If unavailable, analyze usage, temperatures, memory, disk, and network as proxies and clearly say FPS data is missing."
   };
   return runFocusedAiReport(store, "fps-drop", [
     "Answer: Why did my FPS drop?",

@@ -75,6 +75,8 @@ const defaultSettings: AppSettings = {
     storageTimelineRetentionDays: 90,
     gamePerformanceTrackingEnabled: true,
     gamePerformanceSampleMs: 5000,
+    enablePresentMonFps: true,
+    presentMonExecutablePath: "",
     enableAlerts: true,
     enableOverlay: false,
     overlayMode: "compact",

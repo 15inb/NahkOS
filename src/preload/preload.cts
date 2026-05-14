@@ -117,7 +117,8 @@ const api = {
     status: (): Promise<EntertainmentSnapshot> => ipcRenderer.invoke("entertainment:status"),
     recommendations: (): Promise<EntertainmentRecommendation[]> => ipcRenderer.invoke("entertainment:recommendations"),
     clear: (): Promise<AppData> => ipcRenderer.invoke("entertainment:clear"),
-    gamePerformance: (): Promise<{ active: GamePerformanceSession | null; sessions: GamePerformanceSession[] }> => ipcRenderer.invoke("entertainment:gamePerformance"),
+    gamePerformance: (): Promise<{ active: GamePerformanceSession | null; sessions: GamePerformanceSession[]; detected: EntertainmentSnapshot["detected"]; fpsStatus: { presentMonAvailable: boolean; presentMonPath: string; lastPresentMonError?: string; externalFpsFresh: boolean } }> => ipcRenderer.invoke("entertainment:gamePerformance"),
+    submitFps: (fps: number): Promise<boolean> => ipcRenderer.invoke("entertainment:submitFps", fps),
     watchingStatus: (): Promise<WatchingModeStatus> => ipcRenderer.invoke("entertainment:watchingStatus"),
     previewDimming: (): Promise<number[]> => ipcRenderer.invoke("entertainment:previewDimming")
   },

@@ -304,6 +304,8 @@ export interface MonitoringSettings {
   storageTimelineRetentionDays: number;
   gamePerformanceTrackingEnabled: boolean;
   gamePerformanceSampleMs: number;
+  enablePresentMonFps: boolean;
+  presentMonExecutablePath: string;
   enableAlerts: boolean;
   enableOverlay: boolean;
   overlayMode: "compact" | "expanded";
@@ -556,6 +558,7 @@ export interface StorageTimeline {
 export interface GamePerformanceSample {
   time: string;
   fps: number | null;
+  fpsSource?: "presentmon" | "window-title" | "external" | "unavailable";
   cpuUsage: number;
   gpuUsage: number | null;
   cpuTemp: number | null;
@@ -580,6 +583,7 @@ export interface GamePerformanceSession {
   summary: {
     averageFps: number | null;
     minFps: number | null;
+    fpsSource?: string;
     averageCpu: number;
     peakCpu: number;
     averageGpu: number | null;

@@ -10,7 +10,7 @@ import { startClipboardWatcher } from "./services/clipboard.js";
 import { cancelCodexSession, codexAvailability, codexPromptNeedsConfirmation, runCodexSession } from "./services/codex.js";
 import { executeCommand } from "./services/commands.js";
 import { deleteReminderOnBackend, discordStatus, patchReminderOnBackend, pushReminderToBackend, retryReminderOnBackend, saveDiscordBackendToken, syncReminders, testDiscordDm } from "./services/discord.js";
-import { clearEntertainmentHistory, entertainmentSnapshot, generateEntertainmentRecommendations } from "./services/entertainment.js";
+import { clearEntertainmentHistory, entertainmentSnapshot, generateEntertainmentRecommendations, latestEntertainmentDetected } from "./services/entertainment.js";
 import { chooseFolders, indexFolders, openFile, revealFile } from "./services/files.js";
 import { changedFiles, gitStatus, isGitRepository, revertChanges } from "./services/git.js";
 import { getLogFile, log } from "./services/logger.js";
@@ -39,6 +39,8 @@ const reminderTimers = new Map<string, NodeJS.Timeout>();
 let reminderSyncTimer: NodeJS.Timeout | null = null;
 let gamePerfTimer: NodeJS.Timeout | null = null;
 let activeGamePerf: GamePerformanceSession | null = null;
+let lastExternalFps: { value: number; source: "external"; at: number } | null = null;
+let lastPresentMonFps: { executable: string; value: number | null; at: number; error?: string } | null = null;
 let lastPerfCpu = process.cpuUsage();
 let lastPerfAt = process.hrtime.bigint();
 
@@ -580,6 +582,7 @@ function summarizeGamePerformance(session: GamePerformanceSession): GamePerforma
   return {
     averageFps: fps.length ? avg(fps) : null,
     minFps: fps.length ? Math.min(...fps) : null,
+    fpsSource: samples.map((item) => item.fpsSource).filter(Boolean).find((source) => source !== "unavailable") ?? "unavailable",
     averageCpu: avg(samples.map((item) => item.cpuUsage)),
     peakCpu: Math.max(0, ...samples.map((item) => item.cpuUsage)),
     averageGpu: gpu.length ? avg(gpu) : null,
@@ -589,6 +592,67 @@ function summarizeGamePerformance(session: GamePerformanceSession): GamePerforma
     peakCpuTemp: cpuTemp.length ? Math.max(...cpuTemp) : null,
     peakGpuTemp: gpuTemp.length ? Math.max(...gpuTemp) : null
   };
+}
+
+function fpsFromTitle(title: string) {
+  const text = title || "";
+  const match = text.match(/(?:fps|frames(?:\/s)?)\s*[:= -]?\s*(\d{2,4})/i) ?? text.match(/\b(\d{2,4})\s*fps\b/i);
+  const value = match ? Number(match[1]) : NaN;
+  return Number.isFinite(value) && value > 0 && value < 2000 ? value : null;
+}
+
+function parsePresentMonCsv(raw: string) {
+  const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (lines.length < 2) return null;
+  const headers = lines[0].split(",").map((header) => header.trim().toLowerCase());
+  const fpsIndex = headers.findIndex((header) => header.includes("fps"));
+  const msIndex = headers.findIndex((header) => header.replace(/\s+/g, "").includes("msbetweenpresents") || header.replace(/\s+/g, "").includes("msbetweendisplaychange"));
+  const values = lines.slice(1).map((line) => line.split(",").map((cell) => cell.trim())).map((cells) => {
+    if (fpsIndex >= 0) return Number(cells[fpsIndex]);
+    if (msIndex >= 0) {
+      const ms = Number(cells[msIndex]);
+      return ms > 0 ? 1000 / ms : NaN;
+    }
+    return NaN;
+  }).filter((value) => Number.isFinite(value) && value > 0 && value < 2000);
+  if (!values.length) return null;
+  return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length);
+}
+
+async function presentMonFps(active: NonNullable<Awaited<ReturnType<typeof entertainmentSnapshot>>["activeSession"]>, settings: AppSettings["monitoring"]) {
+  if (!settings.enablePresentMonFps) return null;
+  const nowMs = Date.now();
+  if (lastPresentMonFps?.executable === active.executable && nowMs - lastPresentMonFps.at < 12_000) {
+    return lastPresentMonFps.value;
+  }
+  const executablePath = settings.presentMonExecutablePath || await detectExecutable("PresentMon.exe");
+  if (!executablePath) {
+    lastPresentMonFps = { executable: active.executable, value: null, at: nowMs, error: "PresentMon.exe not found in PATH or settings" };
+    return null;
+  }
+  const processName = path.basename(active.path || `${active.executable}.exe`);
+  const output = path.join(app.getPath("temp"), `nahkriinos-presentmon-${process.pid}-${Date.now()}.csv`);
+  try {
+    await execFileAsync(executablePath, ["--process_name", processName, "--output_file", output, "--timed", "2", "--terminate_after_timed", "--exclude_dropped", "--v1_metrics"], { timeout: 8000, windowsHide: true, maxBuffer: 1024 * 1024 });
+    const raw = fs.existsSync(output) ? fs.readFileSync(output, "utf8") : "";
+    const value = parsePresentMonCsv(raw);
+    lastPresentMonFps = { executable: active.executable, value, at: Date.now() };
+    return value;
+  } catch (error) {
+    lastPresentMonFps = { executable: active.executable, value: null, at: Date.now(), error: error instanceof Error ? error.message : String(error) };
+    return null;
+  } finally {
+    fs.rmSync(output, { force: true });
+  }
+}
+
+async function currentGameFps(active: NonNullable<Awaited<ReturnType<typeof entertainmentSnapshot>>["activeSession"]>, settings: AppSettings["monitoring"]) {
+  const titleValue = fpsFromTitle(active.title);
+  if (titleValue !== null) return { fps: titleValue, source: "window-title" as const };
+  if (lastExternalFps && Date.now() - lastExternalFps.at < 8000) return { fps: lastExternalFps.value, source: "external" as const };
+  const pm = await presentMonFps(active, settings);
+  if (pm !== null) return { fps: pm, source: "presentmon" as const };
+  return { fps: null, source: "unavailable" as const };
 }
 
 async function sampleGamePerformance() {
@@ -606,9 +670,11 @@ async function sampleGamePerformance() {
     return;
   }
   const snapshot = await getLightSystemSnapshot(data.settings.monitoring.maxHistoryPoints || 360);
+  const fps = await currentGameFps(active, data.settings.monitoring);
   const sample: GamePerformanceSample = {
     time: snapshot.capturedAt,
-    fps: null,
+    fps: fps.fps,
+    fpsSource: fps.source,
     cpuUsage: snapshot.cpu.usage,
     gpuUsage: snapshot.gpu.usage,
     cpuTemp: snapshot.cpu.temperature,
@@ -621,7 +687,7 @@ async function sampleGamePerformance() {
     networkTxBps: snapshot.network.txBps
   };
   if (!activeGamePerf || activeGamePerf.executable !== active.executable) {
-    activeGamePerf = { id: crypto.randomUUID(), title: active.title, appName: active.appName, executable: active.executable, startedAt: new Date().toISOString(), durationSeconds: 0, samples: [], summary: { averageFps: null, minFps: null, averageCpu: 0, peakCpu: 0, averageGpu: null, peakGpu: null, peakRamPercent: 0, peakVramPercent: null, peakCpuTemp: null, peakGpuTemp: null } };
+    activeGamePerf = { id: crypto.randomUUID(), title: active.title, appName: active.appName, executable: active.executable, startedAt: new Date().toISOString(), durationSeconds: 0, samples: [], summary: { averageFps: null, minFps: null, fpsSource: "unavailable", averageCpu: 0, peakCpu: 0, averageGpu: null, peakGpu: null, peakRamPercent: 0, peakVramPercent: null, peakCpuTemp: null, peakGpuTemp: null } };
   }
   activeGamePerf.samples = [...activeGamePerf.samples, sample].slice(-720);
   activeGamePerf.durationSeconds = Math.round((Date.now() - new Date(activeGamePerf.startedAt).getTime()) / 1000);
@@ -1067,7 +1133,24 @@ function wireIpc() {
   ipcMain.handle("entertainment:status", () => entertainmentSnapshot(store));
   ipcMain.handle("entertainment:recommendations", () => generateEntertainmentRecommendations(store));
   ipcMain.handle("entertainment:clear", () => clearEntertainmentHistory(store));
-  ipcMain.handle("entertainment:gamePerformance", async () => ({ active: activeGamePerf, sessions: (await store.read()).gamePerformanceSessions }));
+  ipcMain.handle("entertainment:gamePerformance", async () => ({
+    active: activeGamePerf,
+    sessions: (await store.read()).gamePerformanceSessions,
+    detected: latestEntertainmentDetected(),
+    fpsStatus: {
+      presentMonAvailable: Boolean((await store.read()).settings.monitoring.presentMonExecutablePath) || Boolean(await detectExecutable("PresentMon.exe")),
+      presentMonPath: (await store.read()).settings.monitoring.presentMonExecutablePath || await detectExecutable("PresentMon.exe"),
+      lastPresentMonError: lastPresentMonFps?.error,
+      externalFpsFresh: Boolean(lastExternalFps && Date.now() - lastExternalFps.at < 8000)
+    }
+  }));
+  ipcMain.handle("entertainment:submitFps", (_event, fps: number) => {
+    if (Number.isFinite(fps) && fps > 0 && fps < 2000) {
+      lastExternalFps = { value: Math.round(fps), source: "external", at: Date.now() };
+      return true;
+    }
+    return false;
+  });
   ipcMain.handle("entertainment:watchingStatus", () => watchingStatus);
   ipcMain.handle("entertainment:previewDimming", async () => {
     const data = await store.read();

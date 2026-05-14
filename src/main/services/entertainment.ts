@@ -6,11 +6,15 @@ import type { JsonStore } from "./storage.js";
 const execFileAsync = promisify(execFile);
 const RESPONSES_URL = "https://api.openai.com/v1/responses";
 let activeSessionId: string | null = null;
+let lastDetected: EntertainmentDetectedApp[] = [];
 
-const gameExecutables = /\b(cyberpunk|eldenring|starfield|valorant|fortnite|minecraft|overwatch|cod|warzone|destiny|halo|diablo|wow|league|dota|cs2|rocketleague|r5apex|bg3|palworld)\b/i;
+const gameExecutables = /\b(cyberpunk|eldenring|starfield|valorant|fortnite|minecraft|overwatch|cod|warzone|destiny|halo|diablo|wow|league|dota|cs2|csgo|rocketleague|r5apex|bg3|palworld|tarkov|escapefromtarkov|eft|helldivers|starcitizen|ffxiv|ffxiv_dx11|gta5|rdr2|witcher3|skyrim|fallout|terraria|roblox|osu!)\b/i;
 const launchers = /\b(steam|epicgameslauncher|battle\.net|battlenet|riotclientservices|gog|ubisoftconnect|eadesktop|xbox)\b/i;
 const mediaApps = /\b(vlc|mpv|plex|jellyfin|kodi|potplayer|wmplayer|itunes|spotify|netflix|crunchyroll)\b/i;
 const browserMediaTitles = /\b(youtube|netflix|crunchyroll|hulu|disney\+|prime video|twitch|plex|jellyfin|max|paramount)\b/i;
+const gamePathPattern = new RegExp(String.raw`[\\/](steamapps[\\/]common|epic games|xboxgames|riot games|battlenet|battle\.net|ubisoft game launcher[\\/]games|ea games|gog games)[\\/]`, "i");
+const gameRuntimePattern = /\b(unityplayer|unrealengine|win64-shipping|shipping\.exe)\b/i;
+const steamClientPattern = new RegExp(String.raw`[\\/]windows[\\/]|[\\/]program files \(x86\)[\\/]steam[\\/]steam\.exe`, "i");
 
 const now = () => new Date().toISOString();
 
@@ -21,7 +25,14 @@ function rows<T>(value: T | T[] | null | undefined): T[] {
 
 async function processWindows() {
   if (process.platform !== "win32") return [];
-  const script = "Get-Process | Where-Object { $_.MainWindowTitle -or $_.Path } | Select-Object -First 180 Id,ProcessName,MainWindowTitle,Path | ConvertTo-Json -Compress";
+  const script = `
+$procs = Get-CimInstance Win32_Process | Select-Object ProcessId,Name,ExecutablePath,CommandLine
+$windows = @{}
+Get-Process | Where-Object { $_.MainWindowTitle } | ForEach-Object { $windows[[int]$_.Id] = $_.MainWindowTitle }
+$procs | Where-Object { $_.ExecutablePath -or $windows.ContainsKey([int]$_.ProcessId) } |
+  Select-Object -First 350 @{Name='Id';Expression={$_.ProcessId}},@{Name='ProcessName';Expression={[IO.Path]::GetFileNameWithoutExtension($_.Name)}},@{Name='MainWindowTitle';Expression={$windows[[int]$_.ProcessId]}},@{Name='Path';Expression={$_.ExecutablePath}},CommandLine |
+  ConvertTo-Json -Compress
+`;
   try {
     const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], { timeout: 3500, maxBuffer: 1024 * 1024 * 3, windowsHide: true });
     return rows<any>(stdout.trim() ? JSON.parse(stdout) : []);
@@ -34,13 +45,17 @@ function classify(row: any, rules: { pattern: string; profile: ImmersiveProfile;
   const executable = String(row.ProcessName || "");
   const title = String(row.MainWindowTitle || executable);
   const filePath = String(row.Path || "");
-  const haystack = `${executable} ${title} ${filePath}`.toLowerCase();
+  const commandLine = String(row.CommandLine || "");
+  const haystack = `${executable} ${title} ${filePath} ${commandLine}`.toLowerCase();
   const matchedRule = rules.find((rule) => rule.enabled && new RegExp(rule.pattern, "i").test(haystack));
   if (matchedRule) {
     return { pid: Number(row.Id), title: title || executable, appName: executable, executable, path: filePath, kind: matchedRule.profile === "gaming" ? "game" : "media", profile: matchedRule.profile, confidence: 88, reason: `Matched rule: ${matchedRule.pattern}` };
   }
-  if (filePath.toLowerCase().includes("\\steamapps\\common\\") || gameExecutables.test(executable)) {
+  if (gamePathPattern.test(filePath) || gameExecutables.test(executable) || gameExecutables.test(filePath)) {
     return { pid: Number(row.Id), title: title || executable, appName: executable, executable, path: filePath, kind: "game", profile: "gaming", confidence: 82, reason: "Recognized game executable or Steam library path" };
+  }
+  if (gameRuntimePattern.test(haystack) && !steamClientPattern.test(filePath)) {
+    return { pid: Number(row.Id), title: title || executable, appName: executable, executable, path: filePath, kind: "game", profile: "gaming", confidence: 70, reason: "Likely game runtime executable" };
   }
   if (mediaApps.test(executable)) {
     return { pid: Number(row.Id), title: title || executable, appName: executable, executable, path: filePath, kind: "media", profile: "watching", confidence: 78, reason: "Recognized media player" };
@@ -115,6 +130,7 @@ export async function entertainmentSnapshot(store: JsonStore): Promise<Entertain
     ? (await processWindows()).map((row) => classify(row, settings.appRules)).filter(Boolean) as EntertainmentDetectedApp[]
     : [];
   const filtered = detected.filter((item) => !shouldExclude(item, settings.excludedApps)).sort((a, b) => b.confidence - a.confidence);
+  lastDetected = filtered;
   const manual = settings.manualProfile !== "off";
   const profile = manual ? settings.manualProfile : filtered[0]?.profile ?? "off";
   const active = settings.immersiveEnabled && (manual || filtered.some((item) => item.confidence >= 60));
@@ -138,6 +154,10 @@ export async function entertainmentSnapshot(store: JsonStore): Promise<Entertain
     },
     privacy: { localOnly: true, trackingEnabled: settings.trackingEnabled, excludedApps: settings.excludedApps }
   };
+}
+
+export function latestEntertainmentDetected(): EntertainmentDetectedApp[] {
+  return lastDetected;
 }
 
 function localRecommendations(snapshot: EntertainmentSnapshot): EntertainmentRecommendation[] {
