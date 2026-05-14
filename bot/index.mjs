@@ -179,7 +179,15 @@ function parseDue(text) {
 }
 
 function formatDiscordDate(iso) {
-  return new Date(iso).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: reminderTimeZone, timeZoneName: "short" });
+  return new Date(iso).toLocaleString("en-US", {
+    timeZone: reminderTimeZone,
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short"
+  });
 }
 
 function formatReminderMessage(reminder) {
