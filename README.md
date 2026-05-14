@@ -48,6 +48,7 @@ Required bot `.env` values:
 ```bash
 DISCORD_BOT_TOKEN=
 DISCORD_TARGET_USER_ID=203025242753335296
+REMINDER_TIME_ZONE=America/New_York
 DATABASE_URL=file:/home/ubuntu/nahkriinos-bot/reminders.sqlite
 BOT_API_TOKEN=
 BOT_API_PORT=47822
@@ -55,6 +56,8 @@ BOT_API_HOST=127.0.0.1
 ```
 
 Do not commit `.env`. The Discord bot token belongs only on the VPS. The desktop app stores only the VPS backend URL and backend API token.
+
+`REMINDER_TIME_ZONE` controls how Discord natural dates are interpreted and displayed. Use an IANA timezone like `America/New_York`, `America/Chicago`, `America/Denver`, or `America/Los_Angeles`.
 
 ## Desktop Reminder Sync
 

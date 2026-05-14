@@ -22,6 +22,8 @@ const apiToken = process.env.BOT_API_TOKEN?.trim();
 const apiPort = Number(process.env.BOT_API_PORT || 47822);
 const apiHost = process.env.BOT_API_HOST || "127.0.0.1";
 const databaseUrl = process.env.DATABASE_URL || "file:./reminders.sqlite";
+const reminderTimeZone = process.env.REMINDER_TIME_ZONE?.trim() || "America/New_York";
+process.env.TZ = reminderTimeZone;
 
 if (!token) throw new Error("DISCORD_BOT_TOKEN is required.");
 if (!apiToken) console.warn("BOT_API_TOKEN is not set. The sync API will reject requests until it is configured.");
@@ -177,7 +179,7 @@ function parseDue(text) {
 }
 
 function formatDiscordDate(iso) {
-  return new Date(iso).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" });
+  return new Date(iso).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: reminderTimeZone, timeZoneName: "short" });
 }
 
 function formatReminderMessage(reminder) {
@@ -409,6 +411,7 @@ const server = http.createServer(async (request, response) => {
 
 server.listen(apiPort, apiHost, () => {
   console.log(`NahkriinOS reminder API listening on http://${apiHost}:${apiPort}`);
+  console.log(`Reminder timezone: ${reminderTimeZone}`);
 });
 
 await client.login(token);

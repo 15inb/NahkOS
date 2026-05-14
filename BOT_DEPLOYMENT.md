@@ -17,6 +17,7 @@ Create `/home/ubuntu/nahkriinos-bot/bot/.env`:
 ```bash
 DISCORD_BOT_TOKEN=
 DISCORD_TARGET_USER_ID=203025242753335296
+REMINDER_TIME_ZONE=America/New_York
 DATABASE_URL=file:/home/ubuntu/nahkriinos-bot/reminders.sqlite
 BOT_API_TOKEN=make-a-long-random-secret
 BOT_API_PORT=47822
@@ -24,6 +25,8 @@ BOT_API_HOST=127.0.0.1
 ```
 
 Never commit `.env`. The desktop app only needs the public backend URL and `BOT_API_TOKEN`; it does not need the Discord bot token.
+
+`REMINDER_TIME_ZONE` controls how `/remind add due:"tomorrow at 7pm"` is interpreted and how due dates are shown in Discord. Use an IANA timezone such as `America/New_York`.
 
 ## Ubuntu Setup with PM2
 
