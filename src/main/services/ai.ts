@@ -160,10 +160,23 @@ async function buildContext(store: JsonStore): Promise<AiContextPreview> {
         durationMinutes: Math.round(item.durationSeconds / 60),
         startedAt: item.startedAt
       }))
-    } : "unavailable"
+    } : "unavailable",
+    secondBrain: {
+      totalItems: data.secondBrainItems?.length ?? 0,
+      recent: (data.secondBrainItems ?? []).slice(0, 35).map((item) => ({
+        kind: item.kind,
+        title: item.title,
+        source: item.source,
+        preview: item.preview.slice(0, 160),
+        tags: item.tags.slice(0, 8),
+        updatedAt: item.updatedAt,
+        path: data.settings.ai.privacy.filePaths ? item.path : item.path ? redactPath(item.path) : undefined
+      }))
+    }
   };
   const categories = categoryList(data, scan);
   if (entertainment) categories.push("Entertainment activity");
+  if (data.secondBrainItems?.length) categories.push("Second Brain memory index");
   const redactions = [
     ...(data.settings.ai.privacy.filePaths ? [] : ["Full file paths are redacted"]),
     ...(data.settings.ai.privacy.processNames ? [] : ["Process names are anonymized"]),

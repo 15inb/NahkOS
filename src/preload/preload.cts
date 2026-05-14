@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { AiChatRequest, AiContextPreview, AiConversation, AiDiagnosisReport, AiStatus, AiStorageRecommendation, AiStreamEvent, AppData, AppSettings, CodexPromptTemplate, CodexRunRequest, CodexSession, CommandItem, DiscordStatus, DiskBenchmarkResult, EntertainmentRecommendation, EntertainmentSnapshot, GamePerformanceSession, LightSystemSnapshot, MonitoringSettings, NoteItem, PerformanceDiagnostics, ReminderItem, StorageAnalysis, StorageScanOptions, StorageScanResult, StorageScanStatus, StorageScanTarget, StorageTimeline, StressTestOptions, StressTestSession, SystemSnapshot, SystemSnapshotOptions, UpdateCheckResult, WatchingModeStatus } from "../shared/types.js";
+import type { AiChatRequest, AiContextPreview, AiConversation, AiDiagnosisReport, AiStatus, AiStorageRecommendation, AiStreamEvent, AppData, AppSettings, CodexPromptTemplate, CodexRunRequest, CodexSession, CommandItem, DiscordStatus, DiskBenchmarkResult, EntertainmentRecommendation, EntertainmentSnapshot, GamePerformanceSession, LightSystemSnapshot, MonitoringSettings, NoteItem, PerformanceDiagnostics, ReminderItem, SecondBrainIndex, SecondBrainItem, SecondBrainKind, StorageAnalysis, StorageScanOptions, StorageScanResult, StorageScanStatus, StorageScanTarget, StorageTimeline, StressTestOptions, StressTestSession, SystemSnapshot, SystemSnapshotOptions, UpdateCheckResult, WatchingModeStatus } from "../shared/types.js";
 
 const api = {
   onOpenCommandPalette: (callback: () => void) => {
@@ -125,6 +125,17 @@ const api = {
     copy: (text: string): Promise<void> => ipcRenderer.invoke("clipboard:copy", text),
     clear: (): Promise<AppData> => ipcRenderer.invoke("clipboard:clear"),
     togglePin: (id: string): Promise<AppData> => ipcRenderer.invoke("clipboard:togglePin", id)
+  },
+  secondBrain: {
+    index: (): Promise<SecondBrainIndex> => ipcRenderer.invoke("secondBrain:index"),
+    search: (query: string, kind?: SecondBrainKind | "all"): Promise<SecondBrainItem[]> => ipcRenderer.invoke("secondBrain:search", query, kind),
+    timeline: (kind?: SecondBrainKind | "all"): Promise<SecondBrainItem[]> => ipcRenderer.invoke("secondBrain:timeline", kind),
+    favorite: (id: string, value: boolean): Promise<AppData> => ipcRenderer.invoke("secondBrain:favorite", id, value),
+    pin: (id: string, value: boolean): Promise<AppData> => ipcRenderer.invoke("secondBrain:pin", id, value),
+    archive: (id: string): Promise<AppData> => ipcRenderer.invoke("secondBrain:archive", id),
+    delete: (id: string): Promise<AppData> => ipcRenderer.invoke("secondBrain:delete", id),
+    open: (id: string): Promise<string> => ipcRenderer.invoke("secondBrain:open", id),
+    reveal: (id: string): Promise<void> => ipcRenderer.invoke("secondBrain:reveal", id)
   },
   system: {
     stats: () => ipcRenderer.invoke("system:stats"),

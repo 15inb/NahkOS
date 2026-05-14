@@ -4,7 +4,7 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import type { AiChatRequest, AppData, AppSettings, CodexPromptTemplate, CommandItem, GamePerformanceSample, GamePerformanceSession, NoteItem, PerformanceDiagnostics, ReminderItem, StorageScanResult, StorageTimeline, StorageTimelineEvent, StorageTimelineSnapshot, StressTestResult, SystemSnapshotOptions, UpdateCheckResult, UpdateInfo, WatchingModeStatus } from "../shared/types.js";
+import type { AiChatRequest, AppData, AppSettings, CodexPromptTemplate, CommandItem, GamePerformanceSample, GamePerformanceSession, NoteItem, PerformanceDiagnostics, ReminderItem, SecondBrainKind, StorageScanResult, StorageTimeline, StorageTimelineEvent, StorageTimelineSnapshot, StressTestResult, SystemSnapshotOptions, UpdateCheckResult, UpdateInfo, WatchingModeStatus } from "../shared/types.js";
 import { aiStatus, analyzeFpsDrop, cancelAiRequest, clearAiConversation, diagnosePcSlow, explainStorageTimeline, exportAiConversation, generateStorageRecommendations, getAiConversation, previewAiContext, sendAiMessage, testOpenAiKey } from "./services/ai.js";
 import { startClipboardWatcher } from "./services/clipboard.js";
 import { cancelCodexSession, codexAvailability, codexPromptNeedsConfirmation, runCodexSession } from "./services/codex.js";
@@ -14,6 +14,7 @@ import { clearEntertainmentHistory, entertainmentSnapshot, generateEntertainment
 import { chooseFolders, indexFolders, openFile, revealFile } from "./services/files.js";
 import { changedFiles, gitStatus, isGitRepository, revertChanges } from "./services/git.js";
 import { getLogFile, log } from "./services/logger.js";
+import { buildSecondBrainIndex, openSecondBrainItem, removeSecondBrainItem, revealSecondBrainItem, searchSecondBrain, secondBrainTimeline, updateSecondBrainItem } from "./services/secondBrain.js";
 import { JsonStore } from "./services/storage.js";
 import { analyzeStorage, cancelStorageScan, exportStorageReport, getLightSystemSnapshot, getSystemCacheDiagnostics, getSystemSnapshot, getSystemStats, killProcess, openProcessLocation, pauseStorageScan, resumeStorageScan, runDiskBenchmark, startStorageScan, startStressTest, stopStressTest, stressTestStatus, storageScanDiagnostics, storageScanStatus, storageScanTargets } from "./services/system.js";
 import { defaultWorkingDirectory, detectExecutable, normalizeUserPath, openFolder, openKnownFolder, openTerminal, pathExists, selectExecutable, selectProjectFolder, validateDirectory } from "./services/tools.js";
@@ -1085,6 +1086,16 @@ function wireIpc() {
   ipcMain.handle("clipboard:togglePin", (_event, id: string) =>
     store.patch((data) => ({ ...data, clipboard: data.clipboard.map((item) => (item.id === id ? { ...item, pinned: !item.pinned } : item)) }))
   );
+
+  ipcMain.handle("secondBrain:index", () => buildSecondBrainIndex(store));
+  ipcMain.handle("secondBrain:search", (_event, query: string, kind?: SecondBrainKind | "all") => searchSecondBrain(store, query, kind));
+  ipcMain.handle("secondBrain:timeline", (_event, kind?: SecondBrainKind | "all") => secondBrainTimeline(store, kind));
+  ipcMain.handle("secondBrain:favorite", (_event, id: string, value: boolean) => updateSecondBrainItem(store, id, { favorite: value }));
+  ipcMain.handle("secondBrain:pin", (_event, id: string, value: boolean) => updateSecondBrainItem(store, id, { pinned: value }));
+  ipcMain.handle("secondBrain:archive", (_event, id: string) => updateSecondBrainItem(store, id, { archived: true }));
+  ipcMain.handle("secondBrain:delete", (_event, id: string) => removeSecondBrainItem(store, id));
+  ipcMain.handle("secondBrain:open", (_event, id: string) => openSecondBrainItem(store, id));
+  ipcMain.handle("secondBrain:reveal", (_event, id: string) => revealSecondBrainItem(store, id));
 
   ipcMain.handle("system:stats", () => getSystemStats());
   ipcMain.handle("system:lightSnapshot", async () => {

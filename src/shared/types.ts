@@ -79,6 +79,69 @@ export interface AppSettings {
   discord: DiscordSettings;
   updates: UpdateSettings;
   entertainment: EntertainmentSettings;
+  secondBrain: SecondBrainSettings;
+}
+
+export type SecondBrainKind =
+  | "note"
+  | "clipboard"
+  | "reminder"
+  | "file"
+  | "download"
+  | "screenshot"
+  | "clip"
+  | "project"
+  | "game"
+  | "media"
+  | "ai-chat"
+  | "storage-scan"
+  | "codex-session"
+  | "command"
+  | "system";
+
+export interface SecondBrainSettings {
+  enabled: boolean;
+  includeClipboard: boolean;
+  includeAiChats: boolean;
+  includeDownloads: boolean;
+  includeScreenshots: boolean;
+  includeFiles: boolean;
+  includeEntertainment: boolean;
+  maxIndexedFiles: number;
+  retentionDays: number;
+  excludedFolders: string[];
+  screenshotFolders: string[];
+  clipFolders: string[];
+}
+
+export interface SecondBrainItem {
+  id: string;
+  kind: SecondBrainKind;
+  title: string;
+  preview: string;
+  source: string;
+  path?: string;
+  url?: string;
+  tags: string[];
+  favorite?: boolean;
+  pinned?: boolean;
+  archived?: boolean;
+  createdAt: string;
+  updatedAt: string;
+  lastAccessedAt?: string;
+  size?: number;
+  score?: number;
+}
+
+export interface SecondBrainIndex {
+  indexedAt: string;
+  items: SecondBrainItem[];
+  stats: {
+    total: number;
+    byKind: Record<string, number>;
+    indexedFolders: number;
+    skipped: number;
+  };
 }
 
 export type ImmersiveProfile = "gaming" | "watching" | "streaming" | "focus";
@@ -317,6 +380,7 @@ export interface AppData {
   stressTestHistory: StressTestResult[];
   entertainmentActivities: EntertainmentActivity[];
   entertainmentRecommendations: EntertainmentRecommendation[];
+  secondBrainItems: SecondBrainItem[];
 }
 
 export interface WatchingModeStatus {

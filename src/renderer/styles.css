@@ -157,6 +157,13 @@ meter { width: 100%; height: 8px; }
 .timeline-item { border: 1px solid var(--line); background: var(--panel-2); border-radius: 8px; padding: 10px 12px; display: flex; justify-content: space-between; gap: 12px; align-items: center; }
 .timeline-item strong, .timeline-item span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .timeline-item span, .timeline-item small { color: var(--muted); font-size: 12px; text-transform: capitalize; }
+.second-brain-page { animation: pageIn .22s ease; }
+.brain-search-row { display: grid; grid-template-columns: minmax(0, 1fr) 190px; gap: 10px; align-items: center; }
+.brain-results { display: grid; gap: 8px; max-height: 560px; overflow: auto; padding-right: 2px; }
+.gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
+.gallery-grid button { min-height: 118px; align-items: flex-start; justify-content: flex-end; flex-direction: column; text-align: left; background: radial-gradient(circle at 20% 15%, color-mix(in srgb, var(--accent), transparent 72%), var(--panel-2)); }
+.gallery-grid strong, .gallery-grid span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gallery-grid span { color: var(--muted); font-size: 12px; }
 @keyframes shimmer { from { background-position: 220% 0; } to { background-position: -220% 0; } }
 @keyframes pageIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .messages { overflow: auto; display: grid; gap: 10px; align-content: start; min-height: 240px; max-height: calc(100vh - 210px); }

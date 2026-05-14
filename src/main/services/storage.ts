@@ -1,7 +1,7 @@
 import { app, safeStorage } from "electron";
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { AiSettings, AppData, AppSettings, CodexPromptTemplate } from "../../shared/types.js";
+import type { AiSettings, AppData, AppSettings, CodexPromptTemplate, SecondBrainSettings } from "../../shared/types.js";
 
 const now = () => new Date().toISOString();
 
@@ -17,6 +17,37 @@ const defaultAiSettings: AiSettings = {
     crashLogs: false
   }
 };
+
+const userHome = () => app.getPath("home");
+
+const defaultSecondBrainSettings = (): SecondBrainSettings => ({
+  enabled: true,
+  includeClipboard: true,
+  includeAiChats: true,
+  includeDownloads: true,
+  includeScreenshots: true,
+  includeFiles: true,
+  includeEntertainment: true,
+  maxIndexedFiles: 1200,
+  retentionDays: 180,
+  excludedFolders: [
+    "C:\\Windows",
+    "C:\\Program Files",
+    "C:\\Program Files (x86)",
+    "C:\\ProgramData\\Microsoft",
+    "C:\\System Volume Information",
+    "C:\\Recovery",
+    "C:\\$Recycle.Bin"
+  ],
+  screenshotFolders: [
+    path.join(userHome(), "Pictures", "Screenshots"),
+    path.join(userHome(), "OneDrive", "Pictures", "Screenshots")
+  ],
+  clipFolders: [
+    path.join(userHome(), "Videos", "Captures"),
+    path.join(userHome(), "Videos", "Clips")
+  ]
+});
 
 const defaultSettings: AppSettings = {
   theme: "midnight",
@@ -110,7 +141,8 @@ const defaultSettings: AppSettings = {
       { pattern: "jellyfin", profile: "watching", enabled: true },
       { pattern: "youtube|netflix|crunchyroll|hulu|disney|prime video", profile: "watching", enabled: true }
     ]
-  }
+  },
+  secondBrain: defaultSecondBrainSettings()
 };
 
 const defaultTemplates = (): CodexPromptTemplate[] => [
@@ -188,7 +220,8 @@ const defaultData = (): AppData => ({
   gamePerformanceSessions: [],
   stressTestHistory: [],
   entertainmentActivities: [],
-  entertainmentRecommendations: []
+  entertainmentRecommendations: [],
+  secondBrainItems: []
 });
 
 export class JsonStore {
@@ -235,6 +268,13 @@ export class JsonStore {
             ...parsed.settings?.entertainment,
             appRules: parsed.settings?.entertainment?.appRules ?? defaultSettings.entertainment.appRules,
             excludedApps: parsed.settings?.entertainment?.excludedApps ?? []
+          },
+          secondBrain: {
+            ...defaultSecondBrainSettings(),
+            ...parsed.settings?.secondBrain,
+            excludedFolders: parsed.settings?.secondBrain?.excludedFolders ?? defaultSecondBrainSettings().excludedFolders,
+            screenshotFolders: parsed.settings?.secondBrain?.screenshotFolders ?? defaultSecondBrainSettings().screenshotFolders,
+            clipFolders: parsed.settings?.secondBrain?.clipFolders ?? defaultSecondBrainSettings().clipFolders
           }
         },
         reminders,
@@ -252,7 +292,8 @@ export class JsonStore {
         gamePerformanceSessions: parsed.gamePerformanceSessions ?? [],
         stressTestHistory: parsed.stressTestHistory ?? [],
         entertainmentActivities: parsed.entertainmentActivities ?? [],
-        entertainmentRecommendations: parsed.entertainmentRecommendations ?? []
+        entertainmentRecommendations: parsed.entertainmentRecommendations ?? [],
+        secondBrainItems: parsed.secondBrainItems ?? []
       };
     } catch {
       this.data = defaultData();

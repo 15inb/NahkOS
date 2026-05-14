@@ -10,6 +10,7 @@ import {
   Battery,
   Bell,
   Bot,
+  Brain,
   Bug,
   CheckCircle2,
   Clipboard,
@@ -51,7 +52,7 @@ import {
   Zap
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
-import type { AiChatMessage, AiContextPreview, AiDiagnosisReport, AiStatus, AiStorageRecommendation, AppData, AppSettings, CodexAvailability, CodexPromptTemplate, CodexRunRequest, CodexSession, CommandItem, CommandKind, DiscordStatus, DiskBenchmarkResult, EntertainmentRecommendation, EntertainmentSnapshot, FileRecord, GamePerformanceSession, LightSystemSnapshot, MonitoringSettings, NoteItem, PerformanceDiagnostics, ProcessInfo, ReminderItem, StorageAnalysis, StorageScanItem, StorageScanResult, StorageScanTarget, StorageTimeline, StressTestKind, StressTestSession, SystemSnapshot, SystemStats, UpdateCheckResult, WatchingModeStatus } from "../shared/types";
+import type { AiChatMessage, AiContextPreview, AiDiagnosisReport, AiStatus, AiStorageRecommendation, AppData, AppSettings, CodexAvailability, CodexPromptTemplate, CodexRunRequest, CodexSession, CommandItem, CommandKind, DiscordStatus, DiskBenchmarkResult, EntertainmentRecommendation, EntertainmentSnapshot, FileRecord, GamePerformanceSession, LightSystemSnapshot, MonitoringSettings, NoteItem, PerformanceDiagnostics, ProcessInfo, ReminderItem, SecondBrainIndex, SecondBrainItem, SecondBrainKind, StorageAnalysis, StorageScanItem, StorageScanResult, StorageScanTarget, StorageTimeline, StressTestKind, StressTestSession, SystemSnapshot, SystemStats, UpdateCheckResult, WatchingModeStatus } from "../shared/types";
 import "highlight.js/styles/github-dark.css";
 import "./styles.css";
 
@@ -149,6 +150,20 @@ const emptyData: AppData = {
         { pattern: "vlc|plex|jellyfin", profile: "watching", enabled: true }
       ]
     },
+    secondBrain: {
+      enabled: true,
+      includeClipboard: true,
+      includeAiChats: true,
+      includeDownloads: true,
+      includeScreenshots: true,
+      includeFiles: true,
+      includeEntertainment: true,
+      maxIndexedFiles: 1200,
+      retentionDays: 180,
+      excludedFolders: ["C:\\Windows", "C:\\Program Files", "C:\\Program Files (x86)", "C:\\ProgramData\\Microsoft"],
+      screenshotFolders: [],
+      clipFolders: []
+    },
     ai: {
       model: "gpt-4.1-mini",
       previewContext: false,
@@ -176,11 +191,13 @@ const emptyData: AppData = {
   gamePerformanceSessions: [],
   stressTestHistory: [],
   entertainmentActivities: [],
-  entertainmentRecommendations: []
+  entertainmentRecommendations: [],
+  secondBrainItems: []
 };
 
 const nav = [
   ["dashboard", Home, "Home"],
+  ["brain", Brain, "Second Brain"],
   ["entertainment", Gamepad2, "Entertainment"],
   ["assistant", Sparkles, "Assistant"],
   ["search", Search, "Search"],
@@ -360,6 +377,7 @@ function App() {
         {error && <div className="error">{error}</div>}
         {update?.available && update.latest && <div className="update-banner"><div><strong>NahkriinOS {update.latest.version} is available</strong><span>{update.latest.releaseNotes || "A newer Windows build is ready to download."}</span></div><button onClick={() => window.assistant.updates.openDownload(update.latest?.downloadUrl)}><Download size={16} /> Download</button><button onClick={() => setUpdate(null)}>Later</button></div>}
         {view === "dashboard" && <Dashboard data={data} system={system} snapshot={snapshot} recentCommands={recentCommands} pinnedNotes={pinnedNotes} runCommand={runCommand} setView={setView} />}
+        {view === "brain" && <SecondBrainView data={data} setData={setData} setView={setView} />}
         {view === "assistant" && <PcAssistant snapshot={snapshot} setView={setView} />}
         {view === "search" && <SearchHub data={data} runCommand={runCommand} setView={setView} />}
         {view === "files" && <Files data={data} setData={setData} />}
@@ -396,6 +414,7 @@ function Dashboard({ data, system, snapshot, recentCommands, pinnedNotes, runCom
         <div className="quick-actions">
           <button onClick={() => setView("assistant")}><Sparkles size={16} /> Ask assistant</button>
           <button onClick={() => setView("search")}><Search size={16} /> Find anything</button>
+          <button onClick={() => setView("brain")}><Brain size={16} /> Second Brain</button>
           <button onClick={() => setView("focus")}><Timer size={16} /> Start focus</button>
           <button onClick={() => setView("notes")}><Notebook size={16} /> Quick note</button>
           <button onClick={() => setView("system")}><Activity size={16} /> PC health</button>
@@ -420,6 +439,7 @@ function Dashboard({ data, system, snapshot, recentCommands, pinnedNotes, runCom
         </Panel>
       )}
       <div className="columns">
+        <Panel title="Continue Where You Left Off"><ContinueCards data={data} setView={setView} /></Panel>
         <SlowPcDiagnosisPanel compact setView={setView} />
         <Panel title="Pinned Notes">{pinnedNotes.length ? pinnedNotes.map((note) => <Row key={note.id} title={note.title} meta={note.tags.join(", ") || "Pinned note"} />) : <Empty text="Pin a note and it will stay close at hand." />}</Panel>
         <Panel title="Reminders">{nextReminders(data.reminders, 5).map((reminder) => <Row key={reminder.id} title={reminder.title || reminder.text} meta={reminderDueLabel(reminder)} action={<button onClick={() => setView("reminders")}><Bell size={15} /></button>} />)} {!nextReminders(data.reminders, 5).length && <Empty text="Add a reminder and NahkriinOS will keep it nearby." />}</Panel>
@@ -460,6 +480,151 @@ function TodayRail({ data, system, setView }: { data: AppData; system: SystemSta
       </Panel>
     </section>
   );
+}
+
+function ContinueCards({ data, setView }: { data: AppData; setView: (view: string) => void }) {
+  const latestProject = [...data.projects].sort((a, b) => b.lastOpenedAt.localeCompare(a.lastOpenedAt))[0];
+  const latestEntertainment = [...data.entertainmentActivities].sort((a, b) => (b.endedAt || b.startedAt).localeCompare(a.endedAt || a.startedAt))[0];
+  const latestNote = [...data.notes].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+  const rows = [
+    latestProject && { title: latestProject.name, meta: `Workspace - ${latestProject.path}`, view: "workspaces" },
+    latestEntertainment && { title: latestEntertainment.title, meta: `${latestEntertainment.profile} - ${formatDistanceToNow(new Date(latestEntertainment.startedAt), { addSuffix: true })}`, view: "entertainment" },
+    latestNote && { title: latestNote.title, meta: `Note edited ${formatDistanceToNow(new Date(latestNote.updatedAt), { addSuffix: true })}`, view: "notes" }
+  ].filter(Boolean) as Array<{ title: string; meta: string; view: string }>;
+  return <>
+    {rows.map((row) => <Row key={`${row.view}-${row.title}`} title={row.title} meta={row.meta} action={<button onClick={() => setView(row.view)}><Play size={15} /></button>} />)}
+    {!rows.length && <Empty text="Open a project, save a note, or track a session and it will appear here." />}
+    <button onClick={() => setView("brain")}><Brain size={16} /> Open Second Brain</button>
+  </>;
+}
+
+const brainKinds: Array<SecondBrainKind | "all"> = ["all", "note", "clipboard", "reminder", "file", "download", "screenshot", "clip", "project", "game", "media", "ai-chat", "codex-session", "storage-scan", "command"];
+
+function kindLabel(kind: SecondBrainKind | "all") {
+  return kind === "all" ? "All" : kind.split("-").map((part) => part[0].toUpperCase() + part.slice(1)).join(" ");
+}
+
+function SecondBrainView({ data, setData, setView }: { data: AppData; setData: (data: AppData) => void; setView: (view: string) => void }) {
+  const [query, setQuery] = useState("");
+  const [kind, setKind] = useState<SecondBrainKind | "all">("all");
+  const [results, setResults] = useState<SecondBrainItem[]>([]);
+  const [timeline, setTimeline] = useState<SecondBrainItem[]>([]);
+  const [indexInfo, setIndexInfo] = useState<SecondBrainIndex | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+
+  async function load(q = query, selectedKind = kind) {
+    const [searchRows, timelineRows] = await Promise.all([
+      window.assistant.secondBrain.search(q, selectedKind),
+      window.assistant.secondBrain.timeline(selectedKind)
+    ]);
+    setResults(searchRows);
+    setTimeline(timelineRows);
+  }
+
+  useEffect(() => {
+    load().catch((err) => setMessage(String(err)));
+  }, [kind]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => load(query, kind).catch((err) => setMessage(String(err))), 120);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  async function rebuild() {
+    setBusy(true);
+    setMessage("");
+    try {
+      const index = await window.assistant.secondBrain.index();
+      setIndexInfo(index);
+      setData(await window.assistant.data.get());
+      await load(query, kind);
+      setMessage(`Indexed ${index.stats.total} memories. Skipped ${index.stats.skipped} protected or inaccessible locations.`);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function mutate(action: () => Promise<AppData>) {
+    const next = await action();
+    setData(next);
+    await load(query, kind);
+  }
+
+  const pinned = data.secondBrainItems.filter((item) => item.pinned || item.favorite).slice(0, 8);
+  const gallery = data.secondBrainItems.filter((item) => item.kind === "screenshot" || item.kind === "clip").slice(0, 12);
+  const downloads = data.secondBrainItems.filter((item) => item.kind === "download").sort((a, b) => (b.size ?? 0) - (a.size ?? 0)).slice(0, 8);
+  const stats = indexInfo?.stats.byKind ?? data.secondBrainItems.reduce<Record<string, number>>((counts, item) => ({ ...counts, [item.kind]: (counts[item.kind] ?? 0) + 1 }), {});
+
+  return <section className="page second-brain-page">
+    <div className="hero-row">
+      <div>
+        <h1>Second Brain</h1>
+        <p>Your local memory layer for notes, files, clipboard snippets, reminders, games, media, screenshots, projects, AI chats, and recent activity.</p>
+      </div>
+      <div className="quick-actions">
+        <button onClick={rebuild} disabled={busy}><RotateCcw size={16} /> {busy ? "Indexing..." : "Refresh memory"}</button>
+        <button onClick={() => setView("settings")}><ShieldAlert size={16} /> Privacy</button>
+      </div>
+    </div>
+    {message && <div className={message.includes("Indexed") ? "source-chips" : "error"}>{message.includes("Indexed") ? <span>{message}</span> : message}</div>}
+    <div className="stat-grid">
+      <Stat title="Memories" value={`${data.secondBrainItems.length}`} />
+      <Stat title="Notes & Clips" value={`${(stats.note ?? 0) + (stats.clipboard ?? 0)}`} />
+      <Stat title="Files & Downloads" value={`${(stats.file ?? 0) + (stats.download ?? 0)}`} />
+      <Stat title="Media Sessions" value={`${(stats.game ?? 0) + (stats.media ?? 0)}`} />
+    </div>
+    <Panel title="Universal Search">
+      <div className="brain-search-row">
+        <input className="big-search" autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find that thing you copied, opened, downloaded, played, watched, or saved..." />
+        <select value={kind} onChange={(event) => setKind(event.target.value as SecondBrainKind | "all")}>{brainKinds.map((item) => <option key={item} value={item}>{kindLabel(item)}</option>)}</select>
+      </div>
+      <div className="source-chips">{brainKinds.slice(0, 10).map((item) => <button key={item} className={kind === item ? "active" : ""} onClick={() => setKind(item)}>{kindLabel(item)}</button>)}</div>
+      <div className="brain-results">
+        {results.slice(0, 28).map((item) => <SecondBrainRow key={item.id} item={item} onMutate={mutate} />)}
+        {!results.length && <Empty text={data.secondBrainItems.length ? "No memories matched that search." : "Refresh memory to build the local index."} />}
+      </div>
+    </Panel>
+    <div className="columns wide-columns">
+      <Panel title="Continue Where You Left Off"><ContinueCards data={data} setView={setView} /></Panel>
+      <Panel title="Favorites & Pins">{pinned.map((item) => <SecondBrainRow key={item.id} item={item} compact onMutate={mutate} />)} {!pinned.length && <Empty text="Pin or favorite memories to build a personal shelf." />}</Panel>
+      <Panel title="Downloads Intelligence">{downloads.map((item) => <SecondBrainRow key={item.id} item={item} compact onMutate={mutate} />)} {!downloads.length && <Empty text="Refresh memory to surface large downloads, installers, and archives." />}</Panel>
+    </div>
+    <div className="columns">
+      <Panel title="Memory Timeline">
+        <div className="activity-timeline">{timeline.slice(0, 18).map((item) => <TimelineMemory key={item.id} item={item} />)} {!timeline.length && <Empty text="Your timeline appears after the first index." />}</div>
+      </Panel>
+      <Panel title="Screenshot + Clip Library">
+        <div className="gallery-grid">{gallery.map((item) => <button key={item.id} onClick={() => window.assistant.secondBrain.open(item.id)}><FileText size={18} /><strong>{item.title}</strong><span>{formatBytes(item.size ?? 0)}</span></button>)}</div>
+        {!gallery.length && <Empty text="Screenshots and captures from common folders will appear here." />}
+      </Panel>
+      <Panel title="Natural Memory Search">
+        <p>Ask the AI Assistant questions like “what did I play last Friday?” or “find large downloads from last month.” It receives a compact Second Brain summary, not raw file trees.</p>
+        <button onClick={() => setView("assistant")}><Sparkles size={16} /> Ask about my memories</button>
+        <small>Private by default: local data stays on this PC unless you explicitly ask the OpenAI assistant and your AI privacy settings allow that category.</small>
+      </Panel>
+    </div>
+  </section>;
+}
+
+function SecondBrainRow({ item, compact = false, onMutate }: { item: SecondBrainItem; compact?: boolean; onMutate: (action: () => Promise<AppData>) => Promise<void> }) {
+  const when = item.lastAccessedAt || item.updatedAt || item.createdAt;
+  const meta = `${kindLabel(item.kind)} - ${item.source} - ${formatDistanceToNow(new Date(when), { addSuffix: true })}${item.size ? ` - ${formatBytes(item.size)}` : ""}${item.path ? ` - ${item.path}` : ""}`;
+  return <Row title={item.title} meta={compact ? `${kindLabel(item.kind)} - ${item.source}` : `${meta} - ${item.preview}`} action={<>
+    {item.path && <button onClick={() => window.assistant.secondBrain.open(item.id)}><Play size={15} /></button>}
+    {item.path && <button onClick={() => window.assistant.secondBrain.reveal(item.id)}><FolderOpen size={15} /></button>}
+    {item.path && <button onClick={() => window.assistant.clipboard.copy(item.path!)}><Clipboard size={15} /></button>}
+    <button onClick={() => onMutate(() => window.assistant.secondBrain.favorite(item.id, !item.favorite))}><Star size={15} fill={item.favorite ? "currentColor" : "none"} /></button>
+    <button onClick={() => onMutate(() => window.assistant.secondBrain.pin(item.id, !item.pinned))}><Package size={15} /></button>
+    <button onClick={() => onMutate(() => window.assistant.secondBrain.archive(item.id))}><Trash2 size={15} /></button>
+  </>} />;
+}
+
+function TimelineMemory({ item }: { item: SecondBrainItem }) {
+  const when = item.lastAccessedAt || item.updatedAt || item.createdAt;
+  return <div className="timeline-item"><div className="timeline-marker" /><div className="timeline-content"><div className="timeline-topline"><strong>{item.title}</strong><small>{formatDistanceToNow(new Date(when), { addSuffix: true })}</small></div><span>{kindLabel(item.kind)} - {item.source}</span><small>{item.preview}</small></div></div>;
 }
 
 function PcAssistant({ snapshot, setView }: { snapshot: SystemSnapshot | null; setView: (view: string) => void }) {
@@ -698,15 +863,17 @@ function SearchHub({ data, runCommand, setView }: { data: AppData; runCommand: (
   const notes = data.notes.filter((item) => `${item.title} ${item.body}`.toLowerCase().includes(needle)).slice(0, 5);
   const files = data.fileIndex.filter((item) => `${item.name} ${item.path}`.toLowerCase().includes(needle)).slice(0, 5);
   const clips = data.clipboard.filter((item) => item.text.toLowerCase().includes(needle)).slice(0, 5);
+  const memories = data.secondBrainItems.filter((item) => `${item.title} ${item.preview} ${item.path ?? ""} ${item.tags.join(" ")}`.toLowerCase().includes(needle)).slice(0, 8);
   return (
     <section className="page">
-      <div className="hero-row"><div><h1>Find anything fast.</h1><p>Search notes, files, clipboard, commands, workspaces, settings, and Codex sessions.</p></div><button onClick={() => setView("settings")}><Settings size={16} /> Settings</button></div>
+      <div className="hero-row"><div><h1>Find anything fast.</h1><p>Search notes, files, clipboard, commands, memories, workspaces, settings, and Codex sessions.</p></div><div className="quick-actions"><button onClick={() => setView("brain")}><Brain size={16} /> Second Brain</button><button onClick={() => setView("settings")}><Settings size={16} /> Settings</button></div></div>
       <input className="big-search" autoFocus value={q} onChange={(event) => setQ(event.target.value)} placeholder="Type to search your day..." />
       <div className="columns">
         <Panel title="Launch">{commands.map((command) => <Row key={command.id} title={command.name} meta={command.value} action={<button onClick={() => runCommand(command)}><Play size={15} /></button>} />)} {!commands.length && <Empty text="No matching launchers yet." />}</Panel>
         <Panel title="Notes">{notes.map((note) => <Row key={note.id} title={note.title} meta={note.body.slice(0, 80)} />)} {!notes.length && <Empty text="No matching notes." />}</Panel>
         <Panel title="Files">{files.map((file) => <Row key={file.id} title={file.name} meta={file.path} action={<button onClick={() => window.assistant.files.open(file.path)}><FolderOpen size={15} /></button>} />)} {!files.length && <Empty text="No matching indexed files." />}</Panel>
       </div>
+      <Panel title="Second Brain">{memories.map((item) => <Row key={item.id} title={item.title} meta={`${kindLabel(item.kind)} - ${item.source} - ${item.preview}`} action={item.path ? <button onClick={() => window.assistant.secondBrain.open(item.id)}><Play size={15} /></button> : undefined} />)} {!memories.length && <Empty text="No matching memories. Open Second Brain and refresh the local index." />}</Panel>
       <Panel title="Clipboard">{clips.map((clip) => <Row key={clip.id} title={clip.text.slice(0, 100)} meta={formatDistanceToNow(new Date(clip.createdAt), { addSuffix: true })} action={<button onClick={() => window.assistant.clipboard.copy(clip.text)}><Clipboard size={15} /></button>} />)} {!clips.length && <Empty text="No matching clipboard snippets." />}</Panel>
     </section>
   );
@@ -1883,12 +2050,28 @@ function SettingsView({ data, setData }: { data: AppData; setData: (data: AppDat
     if (raw) setData(await window.assistant.data.import(JSON.parse(raw)));
   }
   const setPrivacy = (key: keyof AppSettings["ai"]["privacy"], value: boolean) => setSettings({ ...settings, ai: { ...settings.ai, privacy: { ...settings.ai.privacy, [key]: value } } });
-  return <section className="page"><h2>Settings</h2>{notice && <div className="source-chips"><span>{notice}</span></div>}<div className="editor-grid"><Panel title="Appearance & Startup"><div className="form"><select value={settings.theme} onChange={(e) => setSettings({ ...settings, theme: e.target.value as AppSettings["theme"] })}><option value="midnight">Midnight blue</option><option value="dark">Graphite dark</option><option value="oled">OLED black</option><option value="light">Light</option><option value="system">System</option></select><input type="color" value={settings.accent} onChange={(e) => setSettings({ ...settings, accent: e.target.value })} /><input value={settings.globalShortcut} onChange={(e) => setSettings({ ...settings, globalShortcut: e.target.value })} /><label><input type="checkbox" checked={settings.launchAtStartup} onChange={(e) => setSettings({ ...settings, launchAtStartup: e.target.checked })} /> Open NahkriinOS at startup</label><button onClick={save}><Save size={16} /> Save settings</button></div></Panel><Panel title="Discord Reminder Backend"><div className="form"><Row title={discord?.configured ? "VPS reminder backend connected" : "VPS reminder backend not configured"} meta={`Target user ${settings.discord.targetUserId || "203025242753335296"} - ${discord?.secureStorage ? "OS secure storage" : "local encrypted storage unavailable"}`} /><label><input type="checkbox" checked={settings.discord.enabled} onChange={(e) => setSettings({ ...settings, discord: { ...settings.discord, enabled: e.target.checked } })} /> Enable Discord reminder DMs</label><label><input type="checkbox" checked={settings.discord.syncEnabled} onChange={(e) => setSettings({ ...settings, discord: { ...settings.discord, syncEnabled: e.target.checked } })} /> Sync reminders with VPS</label><input value={settings.discord.backendUrl} onChange={(e) => setSettings({ ...settings, discord: { ...settings.discord, backendUrl: e.target.value } })} placeholder="https://your-vps.example.com/reminders" /><input value={settings.discord.targetUserId} onChange={(e) => setSettings({ ...settings, discord: { ...settings.discord, targetUserId: e.target.value } })} placeholder="Discord user ID" /><input type="password" value={discordBackendToken} onChange={(e) => setDiscordBackendToken(e.target.value)} placeholder="Paste VPS backend API token" /><Row title="Last sync" meta={discord?.lastSyncAt ? `${discord.lastSyncStatus} - ${new Date(discord.lastSyncAt).toLocaleString()}${discord.lastSyncError ? ` - ${discord.lastSyncError}` : ""}` : "Never"} /><Row title="Last DM test" meta={discord?.lastTestAt ? `${discord.lastTestStatus} - ${new Date(discord.lastTestAt).toLocaleString()}${discord.lastTestError ? ` - ${discord.lastTestError}` : ""}` : "Never"} /><button onClick={testDiscord}><Bell size={16} /> Test Discord DM</button><button onClick={syncDiscord}><RotateCcw size={16} /> Sync now</button><button onClick={save}><Save size={16} /> Save Discord settings</button><small>The desktop app stores only the VPS backend API token. The Discord bot token stays on the VPS in its .env file and is never needed on this PC.</small></div></Panel><Panel title="OpenAI Assistant"><div className="form"><Row title={aiStatus?.configured ? "OpenAI connected" : "OpenAI disconnected"} meta={`${aiStatus?.model ?? settings.ai.model} - ${aiStatus?.secureStorage ? "OS secure storage" : "local encrypted storage unavailable"}`} /><input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Paste a new OpenAI API key" /><input value={settings.ai.model} onChange={(event) => setSettings({ ...settings, ai: { ...settings.ai, model: event.target.value } })} placeholder="OpenAI model, e.g. gpt-4.1-mini" /><label><input type="checkbox" checked={settings.ai.previewContext} onChange={(event) => setSettings({ ...settings, ai: { ...settings.ai, previewContext: event.target.checked } })} /> Preview context before sending</label><button onClick={testKey}><CheckCircle2 size={16} /> Test API key</button><button onClick={save}><Save size={16} /> Save OpenAI settings</button></div></Panel><Panel title="AI Privacy"><div className="form"><label><input type="checkbox" checked={settings.ai.privacy.hardwareStats} onChange={(e) => setPrivacy("hardwareStats", e.target.checked)} /> Include hardware stats</label><label><input type="checkbox" checked={settings.ai.privacy.processNames} onChange={(e) => setPrivacy("processNames", e.target.checked)} /> Include process names</label><label><input type="checkbox" checked={settings.ai.privacy.filePaths} onChange={(e) => setPrivacy("filePaths", e.target.checked)} /> Include file paths</label><label><input type="checkbox" checked={settings.ai.privacy.storageScanSummaries} onChange={(e) => setPrivacy("storageScanSummaries", e.target.checked)} /> Include storage scan summaries</label><button onClick={save}><Save size={16} /> Save privacy</button></div></Panel><Panel title="Codex & Workspaces"><div className="form"><input value={settings.defaultWorkingDirectory} onChange={(e) => setSettings({ ...settings, defaultWorkingDirectory: e.target.value })} placeholder="Selected workspace, e.g. E:\\Projects\\My App" /><input value={settings.codexExecutablePath} onChange={(e) => setSettings({ ...settings, codexExecutablePath: e.target.value })} placeholder="Codex executable path" /><button onClick={async () => setData(await window.assistant.projects.select())}><FolderOpen size={16} /> Select workspace folder</button><button onClick={async () => setData(await window.assistant.tools.detectCodex())}>Detect Codex from PATH</button><button onClick={async () => setData(await window.assistant.tools.selectCodex())}>Select Codex executable</button><button onClick={save}><Save size={16} /> Save paths</button></div></Panel><Panel title="Monitoring"><div className="form"><label>Refresh rate<input type="number" min="1500" step="500" value={settings.monitoring.refreshMs} onChange={(e) => setSettings({ ...settings, monitoring: { ...settings.monitoring, refreshMs: Number(e.target.value) } })} /></label><label><input type="checkbox" checked={settings.monitoring.enableAlerts} onChange={(e) => setSettings({ ...settings, monitoring: { ...settings.monitoring, enableAlerts: e.target.checked } })} /> Enable health alerts</label><label><input type="checkbox" checked={settings.monitoring.pauseWhenMinimized} onChange={(e) => setSettings({ ...settings, monitoring: { ...settings.monitoring, pauseWhenMinimized: e.target.checked } })} /> Pause when minimized</label><label><input type="checkbox" checked={settings.monitoring.disableBackgroundIndexing} onChange={(e) => setSettings({ ...settings, monitoring: { ...settings.monitoring, disableBackgroundIndexing: e.target.checked } })} /> Disable background indexing</label><label>Storage timeline retention days<input type="number" min="7" max="365" value={settings.monitoring.storageTimelineRetentionDays} onChange={(e) => setSettings({ ...settings, monitoring: { ...settings.monitoring, storageTimelineRetentionDays: Number(e.target.value) } })} /></label><label><input type="checkbox" checked={settings.monitoring.gamePerformanceTrackingEnabled} onChange={(e) => setSettings({ ...settings, monitoring: { ...settings.monitoring, gamePerformanceTrackingEnabled: e.target.checked } })} /> Track lightweight game performance</label><label>Game sample ms<input type="number" min="2000" step="1000" value={settings.monitoring.gamePerformanceSampleMs} onChange={(e) => setSettings({ ...settings, monitoring: { ...settings.monitoring, gamePerformanceSampleMs: Number(e.target.value) } })} /></label><button onClick={save}><Save size={16} /> Save monitoring</button></div></Panel><Panel title="Performance Overlay"><div className="form"><label><input type="checkbox" checked={settings.monitoring.enableOverlay} onChange={(e) => setSettings({ ...settings, monitoring: { ...settings.monitoring, enableOverlay: e.target.checked } })} /> Enable overlay</label><label><input type="checkbox" checked={settings.monitoring.lowPowerMode} onChange={(e) => setSettings({ ...settings, monitoring: { ...settings.monitoring, lowPowerMode: e.target.checked } })} /> Low-power mode</label><label>Opacity<input type="range" min="0.35" max="1" step="0.05" value={settings.monitoring.overlayOpacity} onChange={(e) => setSettings({ ...settings, monitoring: { ...settings.monitoring, overlayOpacity: Number(e.target.value) } })} /></label><label>Refresh ms<input type="number" min="750" step="250" value={settings.monitoring.overlayRefreshMs} onChange={(e) => setSettings({ ...settings, monitoring: { ...settings.monitoring, overlayRefreshMs: Number(e.target.value) } })} /></label><button onClick={save}><Save size={16} /> Save overlay</button></div></Panel><Panel title="NahkriinOS Data"><div className="form"><button onClick={() => window.assistant.folders.openKnown("app")}>Open app folder</button><button onClick={() => window.assistant.folders.openKnown("data")}>Open data folder</button><button onClick={() => window.assistant.folders.openKnown("logs")}>Open logs folder</button><button onClick={async () => navigator.clipboard.writeText(await window.assistant.data.export())}>Export data</button><button onClick={importData}>Import data</button><button className="danger" onClick={async () => confirm("Reset notes, clipboard, file index, sessions, and workspaces?") && setData(await window.assistant.data.reset())}>Reset local data</button></div></Panel></div></section>;
+  const setBrain = <K extends keyof AppSettings["secondBrain"]>(key: K, value: AppSettings["secondBrain"][K]) => setSettings({ ...settings, secondBrain: { ...settings.secondBrain, [key]: value } });
+  return <section className="page settings-page">
+    <h2>Settings</h2>
+    {notice && <div className="source-chips"><span>{notice}</span></div>}
+    <div className="editor-grid">
+      <Panel title="Appearance & Startup"><div className="form"><select value={settings.theme} onChange={(e) => setSettings({ ...settings, theme: e.target.value as AppSettings["theme"] })}><option value="midnight">Midnight blue</option><option value="dark">Graphite dark</option><option value="oled">OLED black</option><option value="light">Light</option><option value="system">System</option></select><input type="color" value={settings.accent} onChange={(e) => setSettings({ ...settings, accent: e.target.value })} /><input value={settings.globalShortcut} onChange={(e) => setSettings({ ...settings, globalShortcut: e.target.value })} /><label><input type="checkbox" checked={settings.launchAtStartup} onChange={(e) => setSettings({ ...settings, launchAtStartup: e.target.checked })} /> Open NahkriinOS at startup</label><button onClick={save}><Save size={16} /> Save settings</button></div></Panel>
+      <Panel title="Second Brain"><div className="form"><label><input type="checkbox" checked={settings.secondBrain.enabled} onChange={(e) => setBrain("enabled", e.target.checked)} /> Enable Second Brain</label><label><input type="checkbox" checked={settings.secondBrain.includeClipboard} onChange={(e) => setBrain("includeClipboard", e.target.checked)} /> Include clipboard history</label><label><input type="checkbox" checked={settings.secondBrain.includeAiChats} onChange={(e) => setBrain("includeAiChats", e.target.checked)} /> Include AI conversations</label><label><input type="checkbox" checked={settings.secondBrain.includeFiles} onChange={(e) => setBrain("includeFiles", e.target.checked)} /> Include indexed files</label><label><input type="checkbox" checked={settings.secondBrain.includeDownloads} onChange={(e) => setBrain("includeDownloads", e.target.checked)} /> Include Downloads folder</label><label><input type="checkbox" checked={settings.secondBrain.includeScreenshots} onChange={(e) => setBrain("includeScreenshots", e.target.checked)} /> Include screenshots and clips</label><label><input type="checkbox" checked={settings.secondBrain.includeEntertainment} onChange={(e) => setBrain("includeEntertainment", e.target.checked)} /> Include games and media activity</label><label>Max indexed memories<input type="number" min="200" max="10000" value={settings.secondBrain.maxIndexedFiles} onChange={(e) => setBrain("maxIndexedFiles", Number(e.target.value))} /></label><label>Retention days<input type="number" min="7" max="730" value={settings.secondBrain.retentionDays} onChange={(e) => setBrain("retentionDays", Number(e.target.value))} /></label><textarea value={settings.secondBrain.excludedFolders.join("\n")} onChange={(e) => setBrain("excludedFolders", e.target.value.split("\n").map((row) => row.trim()).filter(Boolean))} placeholder="Excluded folders, one per line" /><button onClick={save}><Save size={16} /> Save Second Brain</button><small>Indexing is local-first and on demand. Excluded folders are skipped, and Windows system locations stay out of the memory index by default.</small></div></Panel>
+      <Panel title="Discord Reminder Backend"><div className="form"><Row title={discord?.configured ? "VPS reminder backend connected" : "VPS reminder backend not configured"} meta={`Target user ${settings.discord.targetUserId || "203025242753335296"} - ${discord?.secureStorage ? "OS secure storage" : "local encrypted storage unavailable"}`} /><label><input type="checkbox" checked={settings.discord.enabled} onChange={(e) => setSettings({ ...settings, discord: { ...settings.discord, enabled: e.target.checked } })} /> Enable Discord reminder DMs</label><label><input type="checkbox" checked={settings.discord.syncEnabled} onChange={(e) => setSettings({ ...settings, discord: { ...settings.discord, syncEnabled: e.target.checked } })} /> Sync reminders with VPS</label><input value={settings.discord.backendUrl} onChange={(e) => setSettings({ ...settings, discord: { ...settings.discord, backendUrl: e.target.value } })} placeholder="https://your-vps.example.com/reminders" /><input value={settings.discord.targetUserId} onChange={(e) => setSettings({ ...settings, discord: { ...settings.discord, targetUserId: e.target.value } })} placeholder="Discord user ID" /><input type="password" value={discordBackendToken} onChange={(e) => setDiscordBackendToken(e.target.value)} placeholder="Paste VPS backend API token" /><button onClick={testDiscord}><Bell size={16} /> Test Discord DM</button><button onClick={syncDiscord}><RotateCcw size={16} /> Sync now</button><button onClick={save}><Save size={16} /> Save Discord settings</button></div></Panel>
+      <Panel title="OpenAI Assistant"><div className="form"><Row title={aiStatus?.configured ? "OpenAI connected" : "OpenAI disconnected"} meta={`${aiStatus?.model ?? settings.ai.model} - ${aiStatus?.secureStorage ? "OS secure storage" : "local encrypted storage unavailable"}`} /><input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Paste a new OpenAI API key" /><input value={settings.ai.model} onChange={(event) => setSettings({ ...settings, ai: { ...settings.ai, model: event.target.value } })} placeholder="OpenAI model, e.g. gpt-4.1-mini" /><label><input type="checkbox" checked={settings.ai.previewContext} onChange={(event) => setSettings({ ...settings, ai: { ...settings.ai, previewContext: event.target.checked } })} /> Preview context before sending</label><button onClick={testKey}><CheckCircle2 size={16} /> Test API key</button><button onClick={save}><Save size={16} /> Save OpenAI settings</button></div></Panel>
+      <Panel title="AI Privacy"><div className="form"><label><input type="checkbox" checked={settings.ai.privacy.hardwareStats} onChange={(e) => setPrivacy("hardwareStats", e.target.checked)} /> Include hardware stats</label><label><input type="checkbox" checked={settings.ai.privacy.processNames} onChange={(e) => setPrivacy("processNames", e.target.checked)} /> Include process names</label><label><input type="checkbox" checked={settings.ai.privacy.filePaths} onChange={(e) => setPrivacy("filePaths", e.target.checked)} /> Include file paths</label><label><input type="checkbox" checked={settings.ai.privacy.storageScanSummaries} onChange={(e) => setPrivacy("storageScanSummaries", e.target.checked)} /> Include storage scan summaries</label><button onClick={save}><Save size={16} /> Save privacy</button></div></Panel>
+      <Panel title="Codex & Workspaces"><div className="form"><input value={settings.defaultWorkingDirectory} onChange={(e) => setSettings({ ...settings, defaultWorkingDirectory: e.target.value })} placeholder="Selected workspace, e.g. E:\\Projects\\My App" /><input value={settings.codexExecutablePath} onChange={(e) => setSettings({ ...settings, codexExecutablePath: e.target.value })} placeholder="Codex executable path" /><button onClick={async () => setData(await window.assistant.projects.select())}><FolderOpen size={16} /> Select workspace folder</button><button onClick={async () => setData(await window.assistant.tools.detectCodex())}>Detect Codex from PATH</button><button onClick={async () => setData(await window.assistant.tools.selectCodex())}>Select Codex executable</button><button onClick={save}><Save size={16} /> Save paths</button></div></Panel>
+      <Panel title="Monitoring"><div className="form"><label>Refresh rate<input type="number" min="1500" step="500" value={settings.monitoring.refreshMs} onChange={(e) => setSettings({ ...settings, monitoring: { ...settings.monitoring, refreshMs: Number(e.target.value) } })} /></label><label><input type="checkbox" checked={settings.monitoring.enableAlerts} onChange={(e) => setSettings({ ...settings, monitoring: { ...settings.monitoring, enableAlerts: e.target.checked } })} /> Enable health alerts</label><label><input type="checkbox" checked={settings.monitoring.pauseWhenMinimized} onChange={(e) => setSettings({ ...settings, monitoring: { ...settings.monitoring, pauseWhenMinimized: e.target.checked } })} /> Pause when minimized</label><label><input type="checkbox" checked={settings.monitoring.disableBackgroundIndexing} onChange={(e) => setSettings({ ...settings, monitoring: { ...settings.monitoring, disableBackgroundIndexing: e.target.checked } })} /> Disable background indexing</label><label>Storage timeline retention days<input type="number" min="7" max="365" value={settings.monitoring.storageTimelineRetentionDays} onChange={(e) => setSettings({ ...settings, monitoring: { ...settings.monitoring, storageTimelineRetentionDays: Number(e.target.value) } })} /></label><label><input type="checkbox" checked={settings.monitoring.gamePerformanceTrackingEnabled} onChange={(e) => setSettings({ ...settings, monitoring: { ...settings.monitoring, gamePerformanceTrackingEnabled: e.target.checked } })} /> Track lightweight game performance</label><label>Game sample ms<input type="number" min="2000" step="1000" value={settings.monitoring.gamePerformanceSampleMs} onChange={(e) => setSettings({ ...settings, monitoring: { ...settings.monitoring, gamePerformanceSampleMs: Number(e.target.value) } })} /></label><button onClick={save}><Save size={16} /> Save monitoring</button></div></Panel>
+      <Panel title="Performance Overlay"><div className="form"><label><input type="checkbox" checked={settings.monitoring.enableOverlay} onChange={(e) => setSettings({ ...settings, monitoring: { ...settings.monitoring, enableOverlay: e.target.checked } })} /> Enable overlay</label><label><input type="checkbox" checked={settings.monitoring.lowPowerMode} onChange={(e) => setSettings({ ...settings, monitoring: { ...settings.monitoring, lowPowerMode: e.target.checked } })} /> Low-power mode</label><label>Opacity<input type="range" min="0.35" max="1" step="0.05" value={settings.monitoring.overlayOpacity} onChange={(e) => setSettings({ ...settings, monitoring: { ...settings.monitoring, overlayOpacity: Number(e.target.value) } })} /></label><label>Refresh ms<input type="number" min="750" step="250" value={settings.monitoring.overlayRefreshMs} onChange={(e) => setSettings({ ...settings, monitoring: { ...settings.monitoring, overlayRefreshMs: Number(e.target.value) } })} /></label><button onClick={save}><Save size={16} /> Save overlay</button></div></Panel>
+      <Panel title="NahkriinOS Data"><div className="form"><button onClick={() => window.assistant.folders.openKnown("app")}>Open app folder</button><button onClick={() => window.assistant.folders.openKnown("data")}>Open data folder</button><button onClick={() => window.assistant.folders.openKnown("logs")}>Open logs folder</button><button onClick={async () => navigator.clipboard.writeText(await window.assistant.data.export())}>Export data</button><button onClick={importData}>Import data</button><button className="danger" onClick={async () => confirm("Reset notes, clipboard, file index, sessions, and workspaces?") && setData(await window.assistant.data.reset())}>Reset local data</button></div></Panel>
+    </div>
+  </section>;
 }
 function CommandPalette({ data, query, setQuery, close, runCommand, setView }: { data: AppData; query: string; setQuery: (q: string) => void; close: () => void; runCommand: (command: CommandItem) => void; setView: (view: string) => void }) {
   const commandMatches = data.commands.filter((command) => `${command.name} ${command.value}`.toLowerCase().includes(query.toLowerCase())).slice(0, 8);
   const fileMatches = data.fileIndex.filter((file) => `${file.name} ${file.path}`.toLowerCase().includes(query.toLowerCase())).slice(0, 6);
-  return <div className="overlay" onMouseDown={close}><div className="palette" onMouseDown={(e) => e.stopPropagation()}><div className="palette-search"><Search size={18} /><input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Escape" && close()} placeholder="Type a command, file, note, or destination" /></div><h3>Commands</h3>{commandMatches.map((command) => <Row key={command.id} title={command.name} meta={command.value} action={<button onClick={() => runCommand(command)}><Play size={15} /></button>} />)}<h3>Files</h3>{fileMatches.map((file) => <Row key={file.id} title={file.name} meta={file.path} action={<button onClick={() => window.assistant.files.open(file.path)}><FolderOpen size={15} /></button>} />)}<h3>Destinations</h3>{nav.map(([id, Icon, label]) => <Row key={id} title={label} meta="Open view" action={<button onClick={() => { setView(id); close(); }}><Icon size={15} /></button>} />)}</div></div>;
+  const memoryMatches = data.secondBrainItems.filter((item) => `${item.title} ${item.preview} ${item.path ?? ""}`.toLowerCase().includes(query.toLowerCase())).slice(0, 6);
+  return <div className="overlay" onMouseDown={close}><div className="palette" onMouseDown={(e) => e.stopPropagation()}><div className="palette-search"><Search size={18} /><input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Escape" && close()} placeholder="Type a command, file, note, memory, or destination" /></div><h3>Commands</h3>{commandMatches.map((command) => <Row key={command.id} title={command.name} meta={command.value} action={<button onClick={() => runCommand(command)}><Play size={15} /></button>} />)}<h3>Memories</h3>{memoryMatches.map((item) => <Row key={item.id} title={item.title} meta={`${kindLabel(item.kind)} - ${item.source}`} action={<button onClick={() => { setView("brain"); close(); }}><Brain size={15} /></button>} />)}<h3>Files</h3>{fileMatches.map((file) => <Row key={file.id} title={file.name} meta={file.path} action={<button onClick={() => window.assistant.files.open(file.path)}><FolderOpen size={15} /></button>} />)}<h3>Destinations</h3>{nav.map(([id, Icon, label]) => <Row key={id} title={label} meta="Open view" action={<button onClick={() => { setView(id); close(); }}><Icon size={15} /></button>} />)}</div></div>;
 }
 
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
