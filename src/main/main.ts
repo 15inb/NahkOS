@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, Notification, Tray, clipboard, globalShortcut, ipcMain, nativeImage, screen, shell } from "electron";
+import { app, BrowserWindow, Menu, Notification, Tray, clipboard, ipcMain, nativeImage, screen, shell } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
@@ -26,6 +26,11 @@ app.setAppUserModelId("com.nahkriin.os");
 app.setPath("userData", path.join(app.getPath("appData"), "NahkriinOS"));
 app.commandLine.appendSwitch("disable-frame-rate-limit");
 app.commandLine.appendSwitch("disable-gpu-vsync");
+
+function assetPath(name: string) {
+  if (app.isPackaged) return path.join(process.resourcesPath, "assets", name);
+  return path.resolve(__dirname, "../../assets", name);
+}
 
 const store = new JsonStore();
 let mainWindow: BrowserWindow | null = null;
@@ -67,6 +72,7 @@ async function createWindow() {
     minWidth: 1040,
     minHeight: 680,
     title: "NahkriinOS",
+    icon: assetPath("icon.ico"),
     backgroundColor: "#090d12",
     webPreferences: {
       preload: path.join(__dirname, "../preload/preload.cjs"),
@@ -426,23 +432,12 @@ async function getPerformanceDiagnostics(): Promise<PerformanceDiagnostics> {
 }
 
 async function registerShortcut() {
-  const data = await store.read();
-  globalShortcut.unregisterAll();
-  globalShortcut.register(data.settings.globalShortcut, () => {
-    if (!mainWindow) return;
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.show();
-    mainWindow.focus();
-    mainWindow.webContents.send("open-command-palette");
-  });
-  globalShortcut.register(data.settings.monitoring.overlayHotkey, () => {
-    void setOverlayVisible(!(overlayWindow?.isVisible() ?? data.settings.monitoring.enableOverlay));
-  });
+  log("Global keyboard shortcuts disabled");
 }
 
 function createTray() {
   try {
-    const image = nativeImage.createFromPath(app.getPath("exe"));
+    const image = nativeImage.createFromPath(assetPath("tray.png"));
     tray = new Tray(image.isEmpty() ? nativeImage.createEmpty() : image);
     tray.setToolTip("NahkriinOS");
     tray.setContextMenu(Menu.buildFromTemplate([
@@ -1182,6 +1177,67 @@ function wireIpc() {
       externalFpsFresh: Boolean(lastExternalFps && Date.now() - lastExternalFps.at < 8000)
     }
   }));
+  ipcMain.handle("entertainment:favoriteGame", async (_event, gameKey: string, value: boolean) => {
+    const normalized = String(gameKey || "").toLowerCase();
+    return store.patch((data) => ({
+      ...data,
+      entertainmentActivities: data.entertainmentActivities.map((activity) => {
+        const key = `${activity.executable || activity.appName || activity.title}|${activity.title}`.toLowerCase();
+        return key === normalized || activity.executable.toLowerCase() === normalized || activity.title.toLowerCase() === normalized
+          ? { ...activity, favorite: value }
+          : activity;
+      })
+    }));
+  });
+  ipcMain.handle("entertainment:excludeGame", async (_event, executable: string, value: boolean) => {
+    const normalized = String(executable || "").trim();
+    if (!normalized) throw new Error("No game executable was provided.");
+    return store.patch((data) => {
+      const existing = data.settings.entertainment.excludedApps.filter((item) => item.toLowerCase() !== normalized.toLowerCase());
+      return {
+        ...data,
+        settings: {
+          ...data.settings,
+          entertainment: {
+            ...data.settings.entertainment,
+            excludedApps: value ? [...existing, normalized] : existing
+          }
+        }
+      };
+    });
+  });
+  ipcMain.handle("entertainment:exportGameReport", async (_event, gameKey: string) => {
+    const normalized = String(gameKey || "").toLowerCase();
+    const data = await store.read();
+    const sessions = data.gamePerformanceSessions.filter((session) => `${session.executable || session.appName || session.title}|${session.title}`.toLowerCase() === normalized || session.executable.toLowerCase() === normalized || session.title.toLowerCase() === normalized);
+    const activities = data.entertainmentActivities.filter((activity) => `${activity.executable || activity.appName || activity.title}|${activity.title}`.toLowerCase() === normalized || activity.executable.toLowerCase() === normalized || activity.title.toLowerCase() === normalized);
+    const title = sessions[0]?.title || activities[0]?.title || "Game";
+    const report = [
+      `# NahkriinOS Game Report: ${title}`,
+      "",
+      `Exported: ${new Date().toLocaleString()}`,
+      `Sessions: ${Math.max(sessions.length, activities.length)}`,
+      `Tracked playtime: ${Math.max(sessions.reduce((sum, item) => sum + item.durationSeconds, 0), activities.reduce((sum, item) => sum + item.durationSeconds, 0))} seconds`,
+      "",
+      "## Performance Sessions",
+      ...sessions.map((session) => [
+        "",
+        `### ${new Date(session.startedAt).toLocaleString()}`,
+        `Duration: ${session.durationSeconds} seconds`,
+        `Average FPS: ${session.summary.averageFps ?? "Unavailable"}`,
+        `Min FPS: ${session.summary.minFps ?? "Unavailable"}`,
+        `CPU average/peak: ${session.summary.averageCpu}% / ${session.summary.peakCpu}%`,
+        `GPU average/peak: ${session.summary.averageGpu ?? "Unavailable"} / ${session.summary.peakGpu ?? "Unavailable"}`,
+        `CPU/GPU temp peaks: ${session.summary.peakCpuTemp ?? "Unavailable"} / ${session.summary.peakGpuTemp ?? "Unavailable"}`,
+        `Samples: ${session.samples.length}`
+      ].join("\n"))
+    ].join("\n");
+    const safeTitle = title.replace(/[<>:"/\\|?*]/g, "-").slice(0, 80) || "Game";
+    const file = path.join(app.getPath("documents"), `NahkriinOS-${safeTitle}-Game-Report-${Date.now()}.md`);
+    await fs.promises.writeFile(file, report, "utf8");
+    shell.showItemInFolder(file);
+    return file;
+  });
   ipcMain.handle("entertainment:submitFps", (_event, fps: number) => {
     if (Number.isFinite(fps) && fps > 0 && fps < 2000) {
       lastExternalFps = { value: Math.round(fps), source: "external", at: Date.now() };
@@ -1304,7 +1360,6 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
-  globalShortcut.unregisterAll();
   if (clipboardTimer) clearInterval(clipboardTimer);
   if (watchingModeTimer) clearInterval(watchingModeTimer);
   if (gamePerfTimer) clearInterval(gamePerfTimer);

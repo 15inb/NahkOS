@@ -144,7 +144,7 @@ export interface SecondBrainIndex {
   };
 }
 
-export type ImmersiveProfile = "gaming" | "watching" | "streaming" | "focus";
+export type ImmersiveProfile = "gaming" | "watching" | "streaming";
 export type EntertainmentKind = "game" | "show" | "movie" | "video" | "media" | "launcher" | "unknown";
 
 export interface EntertainmentSettings {

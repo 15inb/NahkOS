@@ -4,9 +4,12 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import Database from "better-sqlite3";
-import * as chrono from "chrono-node";
+import { reminderTimeZone, parseDue, formatDiscordDate, reminderActionId, parseReminderAction, reminderActionPatch } from "./reminder-actions.mjs";
 import {
   ApplicationIntegrationType,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   Client,
   Events,
   GatewayIntentBits,
@@ -22,7 +25,6 @@ const apiToken = process.env.BOT_API_TOKEN?.trim();
 const apiPort = Number(process.env.BOT_API_PORT || 47822);
 const apiHost = process.env.BOT_API_HOST || "127.0.0.1";
 const databaseUrl = process.env.DATABASE_URL || "file:./reminders.sqlite";
-const reminderTimeZone = process.env.REMINDER_TIME_ZONE?.trim() || "America/New_York";
 process.env.TZ = reminderTimeZone;
 
 if (!token) throw new Error("DISCORD_BOT_TOKEN is required.");
@@ -171,25 +173,6 @@ function serializeReminder(row) {
   };
 }
 
-function parseDue(text) {
-  const parsed = chrono.parseDate(text, new Date(), { forwardDate: true });
-  const due = parsed || new Date(text);
-  if (!Number.isFinite(due.getTime())) throw new Error(`I could not understand the due date: ${text}`);
-  return due.toISOString();
-}
-
-function formatDiscordDate(iso) {
-  return new Date(iso).toLocaleString("en-US", {
-    timeZone: reminderTimeZone,
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZoneName: "short"
-  });
-}
-
 function formatReminderMessage(reminder) {
   const lines = [
     "⏰ **Reminder Due**",
@@ -206,9 +189,17 @@ function formatReminderMessage(reminder) {
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
-async function sendDm(content) {
+async function sendDm(content, components = []) {
   const user = await client.users.fetch(targetUserId);
-  await user.send({ content });
+  await user.send({ content, components, allowedMentions: { parse: [] } });
+}
+
+function reminderButtons(reminder) {
+  return [new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(reminderActionId(reminder, "complete")).setLabel("Complete").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(reminderActionId(reminder, "snooze10")).setLabel("Snooze 10 minutes").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(reminderActionId(reminder, "snooze60")).setLabel("Snooze 1 hour").setStyle(ButtonStyle.Secondary)
+  )];
 }
 
 function markReminder(id, fields) {
@@ -217,12 +208,17 @@ function markReminder(id, fields) {
   upsertReminder.run({ ...existing, ...fields, updatedAt: now() });
 }
 
+let checkingDueReminders = false;
 async function processDueReminders() {
-  if (!client.isReady()) return;
+  if (!client.isReady() || checkingDueReminders) return;
+  checkingDueReminders = true;
+  try {
   const rows = dueReminders.all(now());
   for (const row of rows) {
     try {
-      await sendDm(formatReminderMessage(row));
+      const current = getReminder.get(row.id);
+      if (!current || current.completed || current.dismissed || current.discordNotificationStatus !== "pending") continue;
+      await sendDm(formatReminderMessage(current), reminderButtons(current));
       markReminder(row.id, {
         discordNotificationStatus: "sent",
         discordNotificationSentAt: now(),
@@ -236,6 +232,9 @@ async function processDueReminders() {
       });
       console.error(`[reminder:${row.id}] DM failed: ${message}`);
     }
+  }
+  } finally {
+    checkingDueReminders = false;
   }
 }
 
@@ -281,6 +280,28 @@ client.once(Events.ClientReady, async () => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
+  if (interaction.isButton()) {
+    const action = parseReminderAction(interaction.customId);
+    if (!action) return;
+    if (interaction.user.id !== targetUserId) {
+      await interaction.reply({ content: "This NahkriinOS reminder bot is private.", ephemeral: true });
+      return;
+    }
+    try {
+      const reminder = getReminder.get(action.id);
+      const patch = reminderActionPatch(reminder, action);
+      markReminder(action.id, patch);
+      await interaction.update({
+        content: `${formatReminderMessage({ ...reminder, ...patch }).replace("Status: Pending", patch.completed ? "Status: Completed" : "Status: Snoozed")}\n${patch.completed ? "Completed in Discord." : `Next reminder: ${formatDiscordDate(patch.dueAt)}`}`,
+        components: [], allowedMentions: { parse: [] }
+      });
+    } catch (error) {
+      const content = error instanceof Error ? error.message : String(error);
+      if (interaction.replied || interaction.deferred) await interaction.followUp({ content, ephemeral: true });
+      else await interaction.reply({ content, ephemeral: true });
+    }
+    return;
+  }
   if (!interaction.isChatInputCommand() || interaction.commandName !== "remind") return;
   if (interaction.user.id !== targetUserId) {
     await interaction.reply({ content: "This NahkriinOS reminder bot is private.", ephemeral: true });
@@ -312,7 +333,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       await interaction.reply({ content: "Reminder deleted.", ephemeral: true });
     } else if (sub === "snooze") {
       const id = resolveReminderId(interaction.options.getString("id", true));
-      markReminder(id, { dueAt: parseDue(interaction.options.getString("due", true)), completed: 0, dismissed: 0, discordNotificationStatus: "pending", discordNotificationSentAt: null, discordNotificationError: null });
+      markReminder(id, { dueAt: parseDue(interaction.options.getString("due", true)), completed: 0, dismissed: 0, notified: 0, notifiedAt: null, dismissedAt: null, discordNotificationStatus: "pending", discordNotificationSentAt: null, discordNotificationError: null });
       await interaction.reply({ content: "Reminder snoozed.", ephemeral: true });
     } else if (sub === "testdm") {
       await sendDm("✅ **NahkriinOS VPS reminders are connected.**");

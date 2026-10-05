@@ -28,7 +28,6 @@ import {
   Home,
   Info,
   LayoutDashboard,
-  Lightbulb,
   Moon,
   Network,
   Notebook,
@@ -44,7 +43,6 @@ import {
   Star,
   Terminal,
   Thermometer,
-  Timer,
   Trash2,
   Upload,
   Wand2,
@@ -53,6 +51,7 @@ import {
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import type { AiChatMessage, AiContextPreview, AiDiagnosisReport, AiStatus, AiStorageRecommendation, AppData, AppSettings, CodexAvailability, CodexPromptTemplate, CodexRunRequest, CodexSession, CommandItem, CommandKind, DiscordStatus, DiskBenchmarkResult, EntertainmentRecommendation, EntertainmentSnapshot, FileRecord, GamePerformanceSession, LightSystemSnapshot, MonitoringSettings, NoteItem, PerformanceDiagnostics, ProcessInfo, ReminderItem, SecondBrainIndex, SecondBrainItem, SecondBrainKind, StorageAnalysis, StorageScanItem, StorageScanResult, StorageScanTarget, StorageTimeline, StressTestKind, StressTestSession, SystemSnapshot, SystemStats, UpdateCheckResult, WatchingModeStatus } from "../shared/types";
+import logoUrl from "../../assets/logo.png";
 import "highlight.js/styles/github-dark.css";
 import "./styles.css";
 
@@ -65,7 +64,7 @@ const emptyData: AppData = {
     theme: "midnight",
     accent: "#2dd4bf",
     launchAtStartup: false,
-    globalShortcut: "CommandOrControl+Shift+Space",
+    globalShortcut: "",
     indexedFolders: [],
     projectFolders: [],
     defaultWorkingDirectory: "",
@@ -95,7 +94,7 @@ const emptyData: AppData = {
       overlayOpacity: 0.88,
       overlayRefreshMs: 1500,
       overlayClickThrough: true,
-      overlayHotkey: "CommandOrControl+Shift+O",
+      overlayHotkey: "",
       overlayPosition: { x: 80, y: 80 },
       overlayPositionPreset: "top-right",
       overlayFontSize: 13,
@@ -201,13 +200,13 @@ const nav = [
   ["dashboard", Home, "Home"],
   ["brain", Brain, "Second Brain"],
   ["entertainment", Gamepad2, "Entertainment"],
+  ["games", Gamepad2, "Games"],
   ["assistant", Sparkles, "Assistant"],
   ["search", Search, "Search"],
   ["clipboard", Clipboard, "Clipboard"],
   ["reminders", Bell, "Reminders"],
   ["notes", Notebook, "Notes"],
   ["files", FileSearch, "Files"],
-  ["focus", Timer, "Focus"],
   ["workspaces", LayoutDashboard, "Workspaces"],
   ["system", Activity, "System"],
   ["codex", Bot, "Codex"],
@@ -264,6 +263,7 @@ function App() {
   const [data, setData] = useState<AppData>(emptyData);
   const [view, setView] = useState("dashboard");
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [selectedGameKey, setSelectedGameKey] = useState("");
   const [query, setQuery] = useState("");
   const [system, setSystem] = useState<SystemStats | null>(null);
   const [snapshot, setSnapshot] = useState<SystemSnapshot | null>(null);
@@ -277,7 +277,6 @@ function App() {
 
   useEffect(() => {
     refresh().catch((err) => setError(String(err)));
-    const stopCommandPalette = window.assistant.onOpenCommandPalette(() => setPaletteOpen(true));
     const stopCodex = window.assistant.onCodexSession((session: CodexSession) => {
       setData((current) => ({
         ...current,
@@ -287,13 +286,6 @@ function App() {
       }));
     });
     const stopReminders = window.assistant.onRemindersUpdated(setData);
-    const onKey = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        setPaletteOpen(true);
-      }
-    };
-    window.addEventListener("keydown", onKey);
     const tick = () => {
       if (document.hidden && data.settings.monitoring.pauseWhenMinimized) return;
       return window.assistant.system.snapshot({
@@ -320,10 +312,8 @@ function App() {
       : Math.max(2000, data.settings.monitoring.refreshMs || 3000);
     const timer = setInterval(tick, intervalMs);
     return () => {
-      stopCommandPalette();
       stopCodex();
       stopReminders();
-      window.removeEventListener("keydown", onKey);
       clearInterval(timer);
     };
   }, [data.settings.monitoring.refreshMs, data.settings.monitoring.lowPowerMode, data.settings.monitoring.pauseWhenMinimized, view]);
@@ -360,7 +350,7 @@ function App() {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div className="brand"><Sparkles size={20} /> NahkriinOS</div>
+        <div className="brand"><img src={logoUrl} alt="" /> NahkriinOS</div>
         <nav>
           {nav.map(([id, Icon, label]) => (
             <button key={id} className={view === id ? "active" : ""} onClick={() => setView(id)}>
@@ -387,8 +377,8 @@ function App() {
         {view === "clipboard" && <ClipboardView data={data} setData={setData} />}
         {view === "reminders" && <RemindersView data={data} setData={setData} />}
         {view === "notes" && <Notes data={data} setData={setData} />}
-        {view === "focus" && <FocusView data={data} setData={setData} />}
-        {view === "entertainment" && <EntertainmentView data={data} setData={setData} />}
+        {view === "entertainment" && <EntertainmentView data={data} setData={setData} setView={setView} />}
+        {view === "games" && <GamesView data={data} setData={setData} selectedGameKey={selectedGameKey} setSelectedGameKey={setSelectedGameKey} setView={setView} />}
         {view === "workspaces" && <WorkspacesView data={data} setData={setData} />}
         {view === "system" && <SystemCenter snapshot={snapshot} settings={data.settings} data={data} setData={setData} />}
         {view === "updates" && <UpdatesView data={data} setData={setData} />}
@@ -396,7 +386,7 @@ function App() {
       </main>
 
       <aside className="agent-rail"><TodayRail data={data} system={system} setView={setView} /></aside>
-      {paletteOpen && <CommandPalette data={data} query={query} setQuery={setQuery} close={() => setPaletteOpen(false)} runCommand={runCommand} setView={setView} />}
+      {paletteOpen && <CommandPalette data={data} query={query} setQuery={setQuery} close={() => setPaletteOpen(false)} runCommand={runCommand} setView={setView} setSelectedGameKey={setSelectedGameKey} />}
     </div>
   );
 }
@@ -411,20 +401,19 @@ function Dashboard({ data, system, snapshot, recentCommands, pinnedNotes, runCom
       <div className="hero-row">
         <div>
           <h1>Good day. NahkriinOS is ready when you are.</h1>
-          <p>Your notes, clipboard, files, focus tools, workspaces, and Codex helper live in one calm place.</p>
+          <p>Your notes, clipboard, files, workspaces, games, and Codex helper live in one calm place.</p>
         </div>
         <div className="quick-actions">
           <button onClick={() => setView("assistant")}><Sparkles size={16} /> Ask assistant</button>
           <button onClick={() => setView("search")}><Search size={16} /> Find anything</button>
           <button onClick={() => setView("brain")}><Brain size={16} /> Second Brain</button>
-          <button onClick={() => setView("focus")}><Timer size={16} /> Start focus</button>
           <button onClick={() => setView("notes")}><Notebook size={16} /> Quick note</button>
           <button onClick={() => setView("system")}><Activity size={16} /> PC health</button>
           <button onClick={() => setView("system")}><Sparkles size={16} /> PC Feels Slow?</button>
         </div>
       </div>
       <div className="stat-grid">
-        <Stat title="Focus" value="25 min" />
+        <Stat title="Reminders" value={String(nextReminders(data.reminders, 12).length)} />
         <Stat title="PC health" value={snapshot ? `${snapshot.healthScore}%` : "Loading"} />
         <Stat title="Memory" value={snapshot ? `${ramPercent}% RAM` : `${data.clipboard.length} clips`} />
         <Stat title="Network" value={snapshot ? `${formatBytes(snapshot.network.rxBps)}/s down` : `${system?.cpuUsage ?? 0}% CPU`} />
@@ -463,10 +452,6 @@ function TodayRail({ data, system, setView }: { data: AppData; system: SystemSta
         <h2>Today</h2>
         <p>A quieter place for the things you touch often.</p>
       </div>
-      <Panel title="Next Focus">
-        <div className="focus-ring">25</div>
-        <button onClick={() => setView("focus")}><Timer size={16} /> Start timer</button>
-      </Panel>
       <Panel title="Tiny Status">
         <Row title="CPU" meta={`${system?.cpuUsage ?? 0}%`} />
         <Row title="Memory" meta={system ? `${formatBytes(system.ramUsed)} used` : "Loading"} />
@@ -1453,7 +1438,7 @@ function SystemCenter({ snapshot, settings, data, setData }: { snapshot: SystemS
 
       {tab === "performance" && <PerformanceDiagnosticsView />}
 
-      {snapshot && tab === "tools" && <div className="columns"><Panel title="Disk Speed Test"><p>A short temp-folder read/write check. It avoids stress testing and deletes its test file afterward.</p><button onClick={runBenchmark} disabled={busy === "benchmark"}><Zap size={16} /> {busy === "benchmark" ? "Running..." : "Run disk test"}</button>{bench && <Row title="Result" meta={`Write ${bench.writeMbps} MB/s - Read ${bench.readMbps} MB/s`} />}</Panel><Panel title="Performance Overlay"><button onClick={() => window.assistant.overlay.toggle().then(setData)}><Gauge size={16} /> Toggle overlay</button><Row title="Mode" meta={`${settings.monitoring.overlayMode} · ${Math.round(settings.monitoring.overlayOpacity * 100)}% opacity`} /><Row title="Hotkey" meta={settings.monitoring.overlayHotkey} /></Panel><Panel title="Stress Tests"><button onClick={() => setTab("stress")}><Zap size={16} /> Open Stress Tests</button><small>Tests are manual, time-limited, and include emergency stop plus temperature auto-stop.</small></Panel></div>}
+      {snapshot && tab === "tools" && <div className="columns"><Panel title="Disk Speed Test"><p>A short temp-folder read/write check. It avoids stress testing and deletes its test file afterward.</p><button onClick={runBenchmark} disabled={busy === "benchmark"}><Zap size={16} /> {busy === "benchmark" ? "Running..." : "Run disk test"}</button>{bench && <Row title="Result" meta={`Write ${bench.writeMbps} MB/s - Read ${bench.readMbps} MB/s`} />}</Panel><Panel title="Performance Overlay"><button onClick={() => window.assistant.overlay.toggle().then(setData)}><Gauge size={16} /> Toggle overlay</button><Row title="Mode" meta={`${settings.monitoring.overlayMode} · ${Math.round(settings.monitoring.overlayOpacity * 100)}% opacity`} /><Row title="Keyboard shortcuts" meta="Disabled to avoid in-game input conflicts" /></Panel><Panel title="Stress Tests"><button onClick={() => setTab("stress")}><Zap size={16} /> Open Stress Tests</button><small>Tests are manual, time-limited, and include emergency stop plus temperature auto-stop.</small></Panel></div>}
     </section>
   );
 }
@@ -1788,75 +1773,6 @@ function MiniChart({ points, label }: { points: number[]; label: string }) {
   return <div className="mini-chart"><span>{label}</span><svg viewBox="0 0 100 44" preserveAspectRatio="none"><path d={pathData} /></svg></div>;
 }
 
-function FocusView({ data, setData }: { data: AppData; setData: React.Dispatch<React.SetStateAction<AppData>> }) {
-  const [minutes, setMinutes] = useState(25);
-  const [running, setRunning] = useState(false);
-  const [goal, setGoal] = useState("");
-  const [reminderText, setReminderText] = useState("");
-  const [dueAt, setDueAt] = useState(() => datetimeInputValue(new Date(Date.now() + 30 * 60_000)));
-  const reminders = [...data.reminders]
-    .filter((reminder) => !reminder.completed)
-    .sort((a, b) => a.dueAt.localeCompare(b.dueAt))
-    .slice(0, 6);
-
-  async function saveReminder() {
-    const text = reminderText.trim();
-    const dueTime = new Date(dueAt);
-    if (!text || Number.isNaN(dueTime.getTime())) return;
-    const reminder: ReminderItem = {
-      id: uid(),
-      text,
-      title: text,
-      notes: "",
-      dueAt: dueTime.toISOString(),
-      completed: false,
-      dismissed: false,
-      notified: false,
-      createdAt: now(),
-      updatedAt: now()
-    };
-    setData(await window.assistant.reminders.save(reminder));
-    setReminderText("");
-    setDueAt(datetimeInputValue(new Date(Date.now() + 30 * 60_000)));
-  }
-
-  return (
-    <section className="page">
-      <div className="hero-row">
-        <div><h1>Focus gently.</h1><p>Set one intention, start a timer, and let NahkriinOS keep the rest nearby.</p></div>
-        <button onClick={() => setRunning(!running)}><Timer size={16} /> {running ? "Pause" : "Start"} focus</button>
-      </div>
-      <div className="columns">
-        <Panel title="Focus Timer">
-          <div className="focus-large">{minutes}</div>
-          <input type="range" min="5" max="90" step="5" value={minutes} onChange={(event) => setMinutes(Number(event.target.value))} />
-          <p>{running ? "Timer running. Stay with the one thing." : "Choose a duration and press Start."}</p>
-        </Panel>
-        <Panel title="Daily Goal">
-          <textarea value={goal} onChange={(event) => setGoal(event.target.value)} placeholder="What would make today feel complete?" />
-          <button><TargetIcon /> Save goal</button>
-        </Panel>
-        <Panel title="Quick Reminder">
-          <div className="form">
-            <input value={reminderText} onChange={(event) => setReminderText(event.target.value)} placeholder="What should NahkriinOS remind you about?" />
-            <input type="datetime-local" value={dueAt} min={datetimeInputValue(new Date())} onChange={(event) => setDueAt(event.target.value)} />
-            <button onClick={saveReminder} disabled={!reminderText.trim()}><Bell size={16} /> Schedule reminder</button>
-          </div>
-          {reminders.map((reminder) => (
-            <Row
-              key={reminder.id}
-              title={reminderTitle(reminder)}
-              meta={`${formatDistanceToNow(new Date(reminder.dueAt), { addSuffix: true })}${reminder.notifiedAt ? " - notified" : ""}`}
-              action={<><button onClick={async () => setData(await window.assistant.reminders.toggleComplete(reminder.id))}><CheckCircle2 size={15} /></button><button onClick={async () => setData(await window.assistant.reminders.delete(reminder.id))}><Trash2 size={15} /></button></>}
-            />
-          ))}
-          {!reminders.length && <Empty text="Schedule a local reminder and NahkriinOS will notify you when it is due." />}
-        </Panel>
-      </div>
-    </section>
-  );
-}
-
 function WorkspacesView({ data, setData }: { data: AppData; setData: React.Dispatch<React.SetStateAction<AppData>> }) {
   const [manual, setManual] = useState("");
   return (
@@ -1903,6 +1819,178 @@ function formatDuration(seconds: number) {
   return hours ? `${hours}h ${minutes}m` : `${minutes}m`;
 }
 
+type GameLibraryEntry = {
+  key: string;
+  name: string;
+  executable: string;
+  appName: string;
+  installPath?: string;
+  installFolder?: string;
+  favorite: boolean;
+  excluded: boolean;
+  sessions: GamePerformanceSession[];
+  activities: EntertainmentSnapshot["recent"];
+};
+
+function gameKeyFromParts(executable: string, title: string) {
+  return `${executable || title}|${title}`.toLowerCase();
+}
+
+function average(values: Array<number | null | undefined>) {
+  const clean = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  return clean.length ? Math.round((clean.reduce((sum, value) => sum + value, 0) / clean.length) * 10) / 10 : null;
+}
+
+function maxMetric(values: Array<number | null | undefined>) {
+  const clean = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  return clean.length ? Math.max(...clean) : null;
+}
+
+function minMetric(values: Array<number | null | undefined>) {
+  const clean = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  return clean.length ? Math.min(...clean) : null;
+}
+
+function installFolderFromPath(filePath?: string) {
+  if (!filePath) return "";
+  const normalized = filePath.replace(/\//g, "\\");
+  const lastSlash = normalized.lastIndexOf("\\");
+  return lastSlash > 0 ? normalized.slice(0, lastSlash) : "";
+}
+
+function buildGameLibrary(data: AppData, active?: GamePerformanceSession | null): GameLibraryEntry[] {
+  const map = new Map<string, GameLibraryEntry>();
+  const addBase = (key: string, name: string, executable: string, appName: string) => {
+    const current = map.get(key);
+    if (current) return current;
+    const excluded = data.settings.entertainment.excludedApps.some((item) => item.toLowerCase() === executable.toLowerCase() || name.toLowerCase().includes(item.toLowerCase()));
+    const entry: GameLibraryEntry = { key, name, executable, appName, favorite: false, excluded, sessions: [], activities: [] };
+    map.set(key, entry);
+    return entry;
+  };
+  for (const session of [active, ...data.gamePerformanceSessions].filter(Boolean) as GamePerformanceSession[]) {
+    const key = gameKeyFromParts(session.executable || session.appName, session.title);
+    addBase(key, session.title, session.executable, session.appName).sessions.push(session);
+  }
+  for (const activity of data.entertainmentActivities.filter((item) => item.profile === "gaming" || item.kind === "game")) {
+    const key = gameKeyFromParts(activity.executable || activity.appName, activity.title);
+    const entry = addBase(key, activity.title, activity.executable, activity.appName);
+    entry.activities.push(activity);
+    entry.favorite = entry.favorite || Boolean(activity.favorite);
+    entry.installPath = entry.installPath || activity.path;
+    entry.installFolder = entry.installFolder || installFolderFromPath(activity.path);
+  }
+  return [...map.values()].sort((a, b) => {
+    if (a.favorite !== b.favorite) return a.favorite ? -1 : 1;
+    return latestGameDate(b).localeCompare(latestGameDate(a));
+  });
+}
+
+function latestGameDate(game: GameLibraryEntry) {
+  return [game.sessions[0]?.endedAt, game.sessions[0]?.startedAt, game.activities[0]?.endedAt, game.activities[0]?.startedAt].filter(Boolean).sort().at(-1) ?? "";
+}
+
+function gamePlaySeconds(game: GameLibraryEntry) {
+  const perf = game.sessions.reduce((sum, session) => sum + session.durationSeconds, 0);
+  const activity = game.activities.reduce((sum, item) => sum + item.durationSeconds, 0);
+  return Math.max(perf, activity);
+}
+
+function gameSessionCount(game: GameLibraryEntry) {
+  return Math.max(game.sessions.length, game.activities.length);
+}
+
+function gameAverageFps(game: GameLibraryEntry) {
+  return average(game.sessions.map((session) => session.summary.averageFps));
+}
+
+function sessionFpsValues(session: GamePerformanceSession) {
+  return session.samples.map((sample) => sample.fps).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+}
+
+function onePercentLowFps(game: GameLibraryEntry) {
+  const values = game.sessions.flatMap(sessionFpsValues).sort((a, b) => a - b);
+  if (!values.length) return null;
+  const count = Math.max(1, Math.ceil(values.length * 0.01));
+  return average(values.slice(0, count));
+}
+
+function mostPlayedLabel(game: GameLibraryEntry, mode: "day" | "hour") {
+  const buckets = new Map<string, number>();
+  const rows = game.activities.length ? game.activities : game.sessions.map((session) => ({ startedAt: session.startedAt, durationSeconds: session.durationSeconds }));
+  for (const row of rows) {
+    const date = new Date(row.startedAt);
+    const key = mode === "day" ? date.toLocaleDateString(undefined, { weekday: "long" }) : `${date.getHours()}:00`;
+    buckets.set(key, (buckets.get(key) ?? 0) + row.durationSeconds);
+  }
+  return [...buckets.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "Not enough data";
+}
+
+function metricLabel(value: number | null | undefined, suffix = "") {
+  return typeof value === "number" && Number.isFinite(value) ? `${value}${suffix}` : "Unavailable";
+}
+
+function GamesView({ data, setData, selectedGameKey, setSelectedGameKey, setView }: { data: AppData; setData: (data: AppData) => void; selectedGameKey: string; setSelectedGameKey: (key: string) => void; setView: (view: string) => void }) {
+  const [active, setActive] = useState<GamePerformanceSession | null>(null);
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState("recent");
+  const [message, setMessage] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => window.assistant.entertainment.gamePerformance().then((next) => !cancelled && setActive(next.active)).catch(() => undefined);
+    load();
+    const timer = setInterval(load, 5000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, []);
+  const games = useMemo(() => {
+    const rows = buildGameLibrary(data, active).filter((game) => `${game.name} ${game.executable} ${game.installFolder ?? ""}`.toLowerCase().includes(query.toLowerCase()));
+    if (sort === "playtime") rows.sort((a, b) => gamePlaySeconds(b) - gamePlaySeconds(a));
+    if (sort === "fps") rows.sort((a, b) => (gameAverageFps(b) ?? -1) - (gameAverageFps(a) ?? -1));
+    return rows;
+  }, [data, active, query, sort]);
+  const selected = games.find((game) => game.key === selectedGameKey) ?? games[0];
+  useEffect(() => {
+    if (!selectedGameKey && selected) setSelectedGameKey(selected.key);
+  }, [selected?.key, selectedGameKey]);
+  async function favorite(game: GameLibraryEntry) {
+    setData(await window.assistant.entertainment.favoriteGame(game.key, !game.favorite));
+  }
+  async function exclude(game: GameLibraryEntry) {
+    setData(await window.assistant.entertainment.excludeGame(game.executable || game.name, !game.excluded));
+  }
+  async function exportReport(game: GameLibraryEntry) {
+    const file = await window.assistant.entertainment.exportGameReport(game.key);
+    setMessage(`Game report exported to ${file}`);
+  }
+  return <section className="page games-page"><div className="hero-row"><div><h2>Games Library</h2><p>Select any tracked game to see playtime, FPS, session history, trends, storage shortcuts, and issue notes.</p></div><div className="quick-actions"><button onClick={() => setView("entertainment")}><Gamepad2 size={16} /> Play & Watch</button><button onClick={() => selected && exportReport(selected)} disabled={!selected}><FileText size={16} /> Export report</button></div></div>{message && <div className="source-chips"><span>{message}</span></div>}<div className="games-layout"><Panel title="Library"><div className="form"><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search tracked games..." /><select value={sort} onChange={(event) => setSort(event.target.value)}><option value="recent">Recently played</option><option value="playtime">Most played</option><option value="fps">Best average FPS</option></select></div><div className="game-card-list">{games.map((game) => <button key={game.key} className={selected?.key === game.key ? "game-card active" : "game-card"} onClick={() => setSelectedGameKey(game.key)}><div className="game-art"><Gamepad2 size={22} /></div><div><strong>{game.name}</strong><span>{latestGameDate(game) ? `Last played ${new Date(latestGameDate(game)).toLocaleString()}` : "No completed session date"}</span><small>{formatDuration(gamePlaySeconds(game))} total - {gameSessionCount(game)} sessions - Avg FPS {metricLabel(gameAverageFps(game))}</small></div></button>)}{!games.length && <Empty text="Play a detected game once and it will appear here. FPS details fill in when PresentMon or another FPS source is available." />}</div></Panel>{selected ? <GameDetailsPanel game={selected} setData={setData} favorite={favorite} exclude={exclude} exportReport={exportReport} /> : <Panel title="Game Details"><Empty text="Select a tracked game to open its details." /></Panel>}</div></section>;
+}
+
+function GameDetailsPanel({ game, setData, favorite, exclude, exportReport }: { game: GameLibraryEntry; setData: (data: AppData) => void; favorite: (game: GameLibraryEntry) => Promise<void>; exclude: (game: GameLibraryEntry) => Promise<void>; exportReport: (game: GameLibraryEntry) => Promise<void> }) {
+  const [report, setReport] = useState<AiDiagnosisReport | null>(null);
+  const [busy, setBusy] = useState(false);
+  const sessions = [...game.sessions].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  const allSamples = sessions.flatMap((session) => session.samples);
+  const fpsValues = sessions.flatMap(sessionFpsValues);
+  const durationValues = sessions.length ? sessions.map((session) => session.durationSeconds) : game.activities.map((item) => item.durationSeconds);
+  const firstPlayed = [...sessions.map((session) => session.startedAt), ...game.activities.map((item) => item.startedAt)].sort()[0];
+  const lastPlayed = latestGameDate(game);
+  const avgSession = average(durationValues);
+  const bestFpsSession = sessions.filter((session) => session.summary.averageFps !== null).sort((a, b) => (b.summary.averageFps ?? 0) - (a.summary.averageFps ?? 0))[0];
+  const lowestFpsSession = sessions.filter((session) => session.summary.averageFps !== null).sort((a, b) => (a.summary.averageFps ?? 0) - (b.summary.averageFps ?? 0))[0];
+  const latestAvg = sessions[0]?.summary.averageFps ?? null;
+  const previousAvg = sessions[1]?.summary.averageFps ?? null;
+  const trend = latestAvg !== null && previousAvg !== null ? latestAvg - previousAvg : null;
+  async function analyze(sessionId?: string) {
+    setBusy(true);
+    try {
+      setReport(await window.assistant.ai.analyzeFpsDrop(sessionId || sessions[0]?.id));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return <div className="game-details"><div className="game-detail-hero"><div className="game-art large"><Gamepad2 size={38} /></div><div><span>{game.favorite ? "Favorite game" : game.excluded ? "Excluded from tracking" : "Tracked game"}</span><h2>{game.name}</h2><p>{game.executable || "Executable unknown"}{game.installFolder ? ` - ${game.installFolder}` : ""}</p></div><div className="quick-actions"><button onClick={() => favorite(game)}><Star size={16} /> {game.favorite ? "Unfavorite" : "Favorite"}</button><button onClick={() => exclude(game)}><ShieldAlert size={16} /> {game.excluded ? "Include" : "Hide"}</button></div></div><div className="stat-grid"><Stat title="Total played" value={formatDuration(gamePlaySeconds(game))} /><Stat title="Sessions" value={String(gameSessionCount(game))} /><Stat title="Average FPS" value={metricLabel(gameAverageFps(game))} /><Stat title="1% low FPS" value={metricLabel(onePercentLowFps(game))} /></div><div className="columns wide-columns"><Panel title="Core Stats"><Row title="First played" meta={firstPlayed ? new Date(firstPlayed).toLocaleString() : "Unavailable"} /><Row title="Last played" meta={lastPlayed ? new Date(lastPlayed).toLocaleString() : "Unavailable"} /><Row title="Average session" meta={avgSession ? formatDuration(avgSession) : "Unavailable"} /><Row title="Longest session" meta={durationValues.length ? formatDuration(Math.max(...durationValues)) : "Unavailable"} /><Row title="Shortest session" meta={durationValues.length ? formatDuration(Math.min(...durationValues)) : "Unavailable"} /><Row title="Best FPS session" meta={bestFpsSession ? `${bestFpsSession.summary.averageFps} FPS - ${new Date(bestFpsSession.startedAt).toLocaleString()}` : "Unavailable"} /><Row title="Lowest FPS session" meta={lowestFpsSession ? `${lowestFpsSession.summary.averageFps} FPS - ${new Date(lowestFpsSession.startedAt).toLocaleString()}` : "Unavailable"} /><Row title="Highest / lowest FPS" meta={`${metricLabel(maxMetric(fpsValues))} / ${metricLabel(minMetric(fpsValues))}`} /><Row title="Average frametime" meta={gameAverageFps(game) ? `${Math.round((1000 / Number(gameAverageFps(game))) * 10) / 10} ms` : "Unavailable"} /></Panel><Panel title="Performance Stats"><Row title="CPU average / peak" meta={`${metricLabel(average(sessions.map((item) => item.summary.averageCpu)), "%")} / ${metricLabel(maxMetric(sessions.map((item) => item.summary.peakCpu)), "%")}`} /><Row title="GPU average / peak" meta={`${metricLabel(average(sessions.map((item) => item.summary.averageGpu)), "%")} / ${metricLabel(maxMetric(sessions.map((item) => item.summary.peakGpu)), "%")}`} /><Row title="RAM peak" meta={metricLabel(maxMetric(sessions.map((item) => item.summary.peakRamPercent)), "%")} /><Row title="VRAM peak" meta={metricLabel(maxMetric(sessions.map((item) => item.summary.peakVramPercent)), "%")} /><Row title="CPU temp avg / peak" meta={`${metricLabel(average(allSamples.map((item) => item.cpuTemp)), "C")} / ${metricLabel(maxMetric(sessions.map((item) => item.summary.peakCpuTemp)), "C")}`} /><Row title="GPU temp avg / peak" meta={`${metricLabel(average(allSamples.map((item) => item.gpuTemp)), "C")} / ${metricLabel(maxMetric(sessions.map((item) => item.summary.peakGpuTemp)), "C")}`} /><Row title="Disk activity" meta={`Read ${formatBytes(average(allSamples.map((item) => item.diskReadBps)) ?? 0)}/s - Write ${formatBytes(average(allSamples.map((item) => item.diskWriteBps)) ?? 0)}/s`} /><Row title="Network activity" meta={`Down ${formatBytes(average(allSamples.map((item) => item.networkRxBps)) ?? 0)}/s - Up ${formatBytes(average(allSamples.map((item) => item.networkTxBps)) ?? 0)}/s`} /></Panel><Panel title="Useful Insights"><Row title="Most played day" meta={mostPlayedLabel(game, "day")} /><Row title="Most played time" meta={mostPlayedLabel(game, "hour")} /><Row title="Weekday vs weekend" meta={`${formatDuration(game.activities.filter((item) => ![0, 6].includes(new Date(item.startedAt).getDay())).reduce((sum, item) => sum + item.durationSeconds, 0))} weekday - ${formatDuration(game.activities.filter((item) => [0, 6].includes(new Date(item.startedAt).getDay())).reduce((sum, item) => sum + item.durationSeconds, 0))} weekend`} /><Row title="Performance trend" meta={trend === null ? "Needs at least two FPS sessions" : trend >= 0 ? `Up ${Math.round(trend * 10) / 10} FPS since previous session` : `Down ${Math.abs(Math.round(trend * 10) / 10)} FPS since previous session`} /><Row title="Heat profile" meta={(maxMetric(sessions.map((item) => item.summary.peakGpuTemp)) ?? 0) >= 82 || (maxMetric(sessions.map((item) => item.summary.peakCpuTemp)) ?? 0) >= 90 ? "Runs hotter than ideal. Check cooling or graphics settings." : "No major temperature warning from tracked samples."} /></Panel></div><div className="columns wide-columns"><Panel title="Charts"><MiniChart points={sessions.slice().reverse().map((session) => Math.round(session.durationSeconds / 60))} label="Session length over time (minutes)" /><MiniChart points={sessions.slice().reverse().map((session) => session.summary.averageFps ?? 0)} label="Average FPS over time" /><MiniChart points={sessions.slice().reverse().map((session) => session.summary.peakGpuTemp ?? 0)} label="Peak GPU temp over time" /></Panel><Panel title="Game Storage"><Row title="Install location" meta={game.installFolder || "Unknown"} action={game.installFolder ? <button onClick={() => window.assistant.files.open(game.installFolder!)}><FolderOpen size={15} /></button> : undefined} /><Row title="Game folder size" meta="Run Storage Scanner on the install folder to calculate size." /><Row title="Mods / shader cache" meta="Unavailable until a known mod/cache folder is detected." /><Row title="Screenshots and clips" meta="Open Second Brain gallery for detected media." /><Row title="Save folder" meta="Not detected yet." /><div className="quick-actions"><button onClick={() => game.installPath && window.assistant.files.open(game.installPath)} disabled={!game.installPath}><Play size={15} /> Launch game</button><button onClick={() => game.installFolder && window.assistant.files.reveal(game.installFolder)} disabled={!game.installFolder}><FolderOpen size={15} /> Open folder</button></div></Panel><Panel title="Actions"><button onClick={() => analyze()} disabled={!sessions.length || busy}><Sparkles size={16} /> {busy ? "Analyzing..." : "Analyze FPS drop"}</button><button onClick={() => exportReport(game)}><FileText size={16} /> Export game report</button><button onClick={() => alert("Game notes are planned for a future pass. For now, add a note in Quick Notes and tag it with the game name.")}><Notebook size={16} /> Add note</button><button onClick={() => window.assistant.secondBrain.index()}><Brain size={16} /> Rescan memories</button><small>Destructive cleanup is never automatic. Storage and save folders are opened for review only.</small></Panel></div><Panel title="Session History"><div className="game-session-list">{sessions.map((session) => <div className="game-session-row" key={session.id}><div><strong>{new Date(session.startedAt).toLocaleString()}</strong><span>{session.endedAt ? `${new Date(session.startedAt).toLocaleTimeString()} - ${new Date(session.endedAt).toLocaleTimeString()}` : "Active or unfinished"} - {formatDuration(session.durationSeconds)}</span></div><span>Avg FPS {metricLabel(session.summary.averageFps)}</span><span>Low {metricLabel(session.summary.minFps)}</span><span>CPU/GPU temp {metricLabel(session.summary.peakCpuTemp, "C")} / {metricLabel(session.summary.peakGpuTemp, "C")}</span><span>{session.summary.fpsSource ?? "FPS source unknown"}</span><button onClick={() => analyze(session.id)}><Sparkles size={14} /></button></div>)}{!sessions.length && <Empty text="Only playtime is available for this game so far. FPS and temperature rows appear once performance sampling captures a session." />}</div></Panel><DiagnosisCard report={report} /></div>;
+}
+
 function FpsDropAnalysisPanel() {
   const [active, setActive] = useState<GamePerformanceSession | null>(null);
   const [sessions, setSessions] = useState<GamePerformanceSession[]>([]);
@@ -1937,12 +2025,14 @@ function FpsDropAnalysisPanel() {
     }
   }
   const session = active?.id === selected ? active : sessions.find((item) => item.id === selected) ?? active ?? sessions[0];
-  const fpsLabel = session?.summary.averageFps === null || !session ? "Unavailable" : `${session.summary.averageFps} avg`;
+  const latestFps = [...(session?.samples ?? [])].reverse().find((item) => typeof item.fps === "number" && Number.isFinite(item.fps));
+  const liveFpsLabel = latestFps?.fps === undefined || latestFps.fps === null ? "Unavailable" : `${latestFps.fps}`;
+  const averageFpsLabel = session?.summary.averageFps === null || !session ? "Unavailable" : `${session.summary.averageFps}`;
   const fpsMeta = session?.summary.fpsSource && session.summary.fpsSource !== "unavailable" ? `FPS source: ${session.summary.fpsSource}` : fpsStatus?.presentMonAvailable ? "Waiting for PresentMon FPS samples" : "Install PresentMon or use a game/window title that exposes FPS";
-  return <Panel title="AI FPS Drop Analysis"><div className="form"><Row title={active ? `Tracking ${active.title}` : "No active game session"} meta={active ? `${active.samples.length} samples - ${formatDuration(active.durationSeconds)} - ${fpsMeta}` : "Launch a detected game to start lightweight tracking."} /><select value={selected} onChange={(event) => setSelected(event.target.value)}><option value="">Latest active/session</option>{active && <option value={active.id}>Active: {active.title}</option>}{sessions.map((item) => <option key={item.id} value={item.id}>{item.title} - {new Date(item.startedAt).toLocaleString()}</option>)}</select>{session && <div className="stat-grid"><Stat title="CPU peak" value={`${session.summary.peakCpu}%`} /><Stat title="GPU peak" value={session.summary.peakGpu === null ? "Unavailable" : `${session.summary.peakGpu}%`} /><Stat title="RAM peak" value={`${session.summary.peakRamPercent}%`} /><Stat title="FPS" value={fpsLabel} /></div>}<MiniChart points={session?.samples.map((item) => item.fps ?? 0) ?? []} label="FPS during session" /><MiniChart points={session?.samples.map((item) => item.cpuUsage) ?? []} label="CPU during session" /><MiniChart points={session?.samples.map((item) => item.gpuUsage ?? 0) ?? []} label="GPU during session" /><div className="sensor-card"><strong>Detection & FPS Source</strong>{detected.slice(0, 4).map((item) => <Row key={`${item.pid}-${item.title}`} title={item.title} meta={`${item.profile} - ${item.confidence}% - ${item.reason}`} />)}{!detected.length && <Empty text="No games/media detected right now. Detection now checks executable paths, Steam/Epic/Xbox folders, Unity/Unreal runtimes, and known game names." />}<Row title={fpsStatus?.presentMonAvailable ? "PresentMon detected" : "PresentMon not detected"} meta={fpsStatus?.presentMonPath || "FPS requires PresentMon for most games. NahkriinOS can still analyze CPU/GPU/RAM/temps without it."} />{fpsStatus?.lastPresentMonError && <Row title="PresentMon note" meta={fpsStatus.lastPresentMonError} />}</div><button onClick={analyze} disabled={busy}><Sparkles size={15} /> {busy ? "Analyzing..." : "Analyze FPS Drop"}</button>{message && <div className="error">{message}</div>}<DiagnosisCard report={report} /></div></Panel>;
+  return <Panel title="AI FPS Drop Analysis"><div className="form"><Row title={active ? `Tracking ${active.title}` : "No active game session"} meta={active ? `${active.samples.length} samples - ${formatDuration(active.durationSeconds)} - ${fpsMeta}` : "Launch a detected game to start lightweight tracking."} /><select value={selected} onChange={(event) => setSelected(event.target.value)}><option value="">Latest active/session</option>{active && <option value={active.id}>Active: {active.title}</option>}{sessions.map((item) => <option key={item.id} value={item.id}>{item.title} - {new Date(item.startedAt).toLocaleString()}</option>)}</select>{session && <div className="stat-grid"><Stat title="Live FPS" value={liveFpsLabel} /><Stat title="Average FPS" value={averageFpsLabel} /><Stat title="CPU peak" value={`${session.summary.peakCpu}%`} /><Stat title="GPU peak" value={session.summary.peakGpu === null ? "Unavailable" : `${session.summary.peakGpu}%`} /></div>}<MiniChart points={session?.samples.map((item) => item.fps ?? 0) ?? []} label="Live FPS samples" /><MiniChart points={session?.samples.map((item) => item.cpuUsage) ?? []} label="CPU during session" /><MiniChart points={session?.samples.map((item) => item.gpuUsage ?? 0) ?? []} label="GPU during session" /><div className="sensor-card"><strong>Detection & FPS Source</strong>{detected.slice(0, 4).map((item) => <Row key={`${item.pid}-${item.title}`} title={item.title} meta={`${item.profile} - ${item.confidence}% - ${item.reason}`} />)}{!detected.length && <Empty text="No games/media detected right now. Detection now checks executable paths, Steam/Epic/Xbox folders, Unity/Unreal runtimes, and known game names." />}<Row title={fpsStatus?.presentMonAvailable ? "PresentMon detected" : "PresentMon not detected"} meta={fpsStatus?.presentMonPath || "FPS requires PresentMon for most games. NahkriinOS can still analyze CPU/GPU/RAM/temps without it."} />{fpsStatus?.lastPresentMonError && <Row title="PresentMon note" meta={fpsStatus.lastPresentMonError} />}</div><button onClick={analyze} disabled={busy}><Sparkles size={15} /> {busy ? "Analyzing..." : "Analyze FPS Drop"}</button>{message && <div className="error">{message}</div>}<DiagnosisCard report={report} /></div></Panel>;
 }
 
-function EntertainmentView({ data, setData }: { data: AppData; setData: (data: AppData) => void }) {
+function EntertainmentView({ data, setData, setView }: { data: AppData; setData: (data: AppData) => void; setView: (view: string) => void }) {
   const [snapshot, setSnapshot] = useState<EntertainmentSnapshot | null>(null);
   const [watchingStatus, setWatchingStatus] = useState<WatchingModeStatus | null>(null);
   const [recommendations, setRecommendations] = useState<EntertainmentRecommendation[]>(data.entertainmentRecommendations);
@@ -1981,11 +2071,7 @@ function EntertainmentView({ data, setData }: { data: AppData; setData: (data: A
   }
   const recent = snapshot?.recent ?? data.entertainmentActivities;
   const active = snapshot?.activeSession;
-  return <section className="page entertainment-page"><div className="hero-row"><div><h2>Play & Watch</h2><p>NahkriinOS can quiet distractions, track your sessions locally, and help pick what to play or watch next.</p></div><div className="quick-actions"><button onClick={() => setManual(snapshot?.active ? "off" : "gaming")}><Gamepad2 size={16} /> {snapshot?.active ? "Exit Immersive" : "Gaming Mode"}</button><button onClick={() => setManual("watching")}><Film size={16} /> Watching Mode</button><button onClick={generatePicks}><Sparkles size={16} /> Tonight's Picks</button></div></div>{message && <div className="source-chips"><span>{message}</span></div>}<div className="entertainment-hero"><div><span>{watchingStatus?.active ? "Cinema Dimming Active" : snapshot?.active ? "Immersive Mode Active" : "Ready"}</span><strong>{watchingStatus?.active ? `Watching on ${watchingStatus.playbackDisplayLabel}` : snapshot?.profile === "off" || !snapshot ? "No media detected" : `${snapshot.profile} profile`}</strong><p>{watchingStatus?.active ? `${watchingStatus.app}: ${watchingStatus.title || "Fullscreen playback"} - dimming ${watchingStatus.dimmedDisplayIds.length} monitor${watchingStatus.dimmedDisplayIds.length === 1 ? "" : "s"}` : snapshot?.reason ?? "NahkriinOS is watching for games, media players, and streaming windows."}</p></div><div className="quick-actions"><button onClick={() => setManual("focus")}>Focus</button><button onClick={() => setManual("streaming")}>Streaming</button><button onClick={() => setManual("off")}>Off</button></div></div><div className="stat-grid"><Stat title="Game time" value={formatDuration(snapshot?.totals.gameSeconds ?? 0)} /><Stat title="Watch time" value={formatDuration(snapshot?.totals.watchSeconds ?? 0)} /><Stat title="This week" value={formatDuration(snapshot?.totals.thisWeekSeconds ?? 0)} /><Stat title="Sessions" value={String(snapshot?.totals.sessions ?? 0)} /></div><div className="columns wide-columns"><Panel title="Watching Mode"><Row title={watchingStatus?.active ? "Active" : "Inactive"} meta={watchingStatus?.reason ?? "Waiting for fullscreen playback"} /><Row title="Playback monitor" meta={watchingStatus?.playbackDisplayLabel || "Not detected"} /><Row title="Fullscreen" meta={watchingStatus?.fullscreen ? "Yes" : "No"} /><Row title="Dimmed monitors" meta={watchingStatus?.dimmedDisplayIds.length ? watchingStatus.dimmedDisplayIds.join(", ") : "None"} action={<button onClick={() => window.assistant.entertainment.previewDimming()}><Gauge size={15} /></button>} /></Panel><Panel title="Now Detected">{active && <Row title={active.title} meta={`${active.profile} - ${formatDuration(active.durationSeconds)} - ${active.appName}`} />}{snapshot?.detected.slice(0, 5).map((item) => <Row key={`${item.pid}-${item.title}`} title={item.title} meta={`${item.kind} - ${item.reason} - ${item.confidence}%`} />)}{!snapshot?.detected.length && <Empty text="Launch a game, media player, or streaming page and NahkriinOS will detect it." />}</Panel><Panel title="Cinema Settings"><div className="form"><label><input type="checkbox" checked={settings.entertainment.monitorDimmingEnabled} onChange={(e) => setSettings({ ...settings, entertainment: { ...settings.entertainment, monitorDimmingEnabled: e.target.checked } })} /> Dim other monitors during Watching Mode</label><label><input type="checkbox" checked={settings.entertainment.onlyDimFullscreenPlayback} onChange={(e) => setSettings({ ...settings, entertainment: { ...settings.entertainment, onlyDimFullscreenPlayback: e.target.checked } })} /> Only dim during fullscreen playback</label><label><input type="checkbox" checked={settings.entertainment.keepOverlayMonitorUndimmed} onChange={(e) => setSettings({ ...settings, entertainment: { ...settings.entertainment, keepOverlayMonitorUndimmed: e.target.checked } })} /> Keep overlay monitor undimmed</label><label>Dim amount {Math.round(settings.entertainment.dimAmount * 100)}%<input type="range" min="0.2" max="0.92" step="0.02" value={settings.entertainment.dimAmount} onChange={(e) => setSettings({ ...settings, entertainment: { ...settings.entertainment, dimAmount: Number(e.target.value) } })} /></label><label>Fade duration<input type="number" min="0" max="3000" step="50" value={settings.entertainment.dimFadeMs} onChange={(e) => setSettings({ ...settings, entertainment: { ...settings.entertainment, dimFadeMs: Number(e.target.value) } })} /></label><label><input type="checkbox" checked={settings.entertainment.dimDebug} onChange={(e) => setSettings({ ...settings, entertainment: { ...settings.entertainment, dimDebug: e.target.checked } })} /> Dimming debug logs</label><button onClick={() => window.assistant.entertainment.previewDimming()}><Gauge size={16} /> Preview dimming</button><button onClick={() => save()}><Save size={16} /> Save cinema settings</button></div></Panel></div><div className="columns wide-columns"><FpsDropAnalysisPanel /><Panel title="Tonight's Picks"><div className="recommendation-grid">{recommendations.slice(0, 6).map((item) => <div className="recommendation-card" key={item.id}><span>{item.category} - {item.confidence}</span><strong>{item.title}</strong><p>{item.explanation}</p><small>{item.source === "openai" ? "OpenAI recommendation" : "Local insight"}</small></div>)}</div>{!recommendations.length && <Empty text="Generate picks after a little play/watch history, or ask the assistant what to play tonight." />}</Panel><Panel title="Privacy & Controls"><div className="form"><label><input type="checkbox" checked={settings.entertainment.trackingEnabled} onChange={(e) => setSettings({ ...settings, entertainment: { ...settings.entertainment, trackingEnabled: e.target.checked } })} /> Track sessions locally</label><label><input type="checkbox" checked={settings.entertainment.immersiveEnabled} onChange={(e) => setSettings({ ...settings, entertainment: { ...settings.entertainment, immersiveEnabled: e.target.checked } })} /> Enable immersive mode</label><label><input type="checkbox" checked={settings.entertainment.autoDetect} onChange={(e) => setSettings({ ...settings, entertainment: { ...settings.entertainment, autoDetect: e.target.checked } })} /> Auto-detect games/media</label><label><input type="checkbox" checked={settings.entertainment.suppressNotifications} onChange={(e) => setSettings({ ...settings, entertainment: { ...settings.entertainment, suppressNotifications: e.target.checked } })} /> Suppress non-critical notifications</label><label><input type="checkbox" checked={settings.entertainment.pauseBackgroundScans} onChange={(e) => setSettings({ ...settings, entertainment: { ...settings.entertainment, pauseBackgroundScans: e.target.checked } })} /> Pause scans/indexing</label><input value={settings.entertainment.excludedApps.join(", ")} onChange={(e) => setSettings({ ...settings, entertainment: { ...settings.entertainment, excludedApps: e.target.value.split(",").map((item) => item.trim()).filter(Boolean) } })} placeholder="Excluded apps, comma separated" /><button onClick={() => save()}><Save size={16} /> Save entertainment settings</button><button className="danger" onClick={async () => confirm("Clear entertainment history?") && setData(await window.assistant.entertainment.clear())}><Trash2 size={16} /> Clear history</button></div></Panel><Panel title="Recent Activity"><div className="activity-timeline">{recent.slice(0, 8).map((item) => <div className="timeline-item" key={item.id}><div><strong>{item.title}</strong><span>{item.kind} - {formatDuration(item.durationSeconds)} - {new Date(item.startedAt).toLocaleString()}</span></div><small>{item.profile}</small></div>)}</div>{!recent.length && <Empty text="Your local play/watch history will appear here." />}</Panel></div></section>;
-}
-
-function TargetIcon() {
-  return <Lightbulb size={16} />;
+  return <section className="page entertainment-page"><div className="hero-row"><div><h2>Play & Watch</h2><p>NahkriinOS can quiet distractions, track your sessions locally, and help pick what to play or watch next.</p></div><div className="quick-actions"><button onClick={() => setManual(snapshot?.active ? "off" : "gaming")}><Gamepad2 size={16} /> {snapshot?.active ? "Exit Immersive" : "Gaming Mode"}</button><button onClick={() => setManual("watching")}><Film size={16} /> Watching Mode</button><button onClick={generatePicks}><Sparkles size={16} /> Tonight's Picks</button></div></div>{message && <div className="source-chips"><span>{message}</span></div>}<div className="entertainment-hero"><div><span>{watchingStatus?.active ? "Cinema Dimming Active" : snapshot?.active ? "Immersive Mode Active" : "Ready"}</span><strong>{watchingStatus?.active ? `Watching on ${watchingStatus.playbackDisplayLabel}` : snapshot?.profile === "off" || !snapshot ? "No media detected" : `${snapshot.profile} profile`}</strong><p>{watchingStatus?.active ? `${watchingStatus.app}: ${watchingStatus.title || "Fullscreen playback"} - dimming ${watchingStatus.dimmedDisplayIds.length} monitor${watchingStatus.dimmedDisplayIds.length === 1 ? "" : "s"}` : snapshot?.reason ?? "NahkriinOS is watching for games, media players, and streaming windows."}</p></div><div className="quick-actions"><button onClick={() => setManual("streaming")}>Streaming</button><button onClick={() => setManual("off")}>Off</button></div></div><div className="stat-grid"><Stat title="Game time" value={formatDuration(snapshot?.totals.gameSeconds ?? 0)} /><Stat title="Watch time" value={formatDuration(snapshot?.totals.watchSeconds ?? 0)} /><Stat title="This week" value={formatDuration(snapshot?.totals.thisWeekSeconds ?? 0)} /><Stat title="Sessions" value={String(snapshot?.totals.sessions ?? 0)} /></div><div className="columns wide-columns"><Panel title="Watching Mode"><Row title={watchingStatus?.active ? "Active" : "Inactive"} meta={watchingStatus?.reason ?? "Waiting for fullscreen playback"} /><Row title="Playback monitor" meta={watchingStatus?.playbackDisplayLabel || "Not detected"} /><Row title="Fullscreen" meta={watchingStatus?.fullscreen ? "Yes" : "No"} /><Row title="Dimmed monitors" meta={watchingStatus?.dimmedDisplayIds.length ? watchingStatus.dimmedDisplayIds.join(", ") : "None"} action={<button onClick={() => window.assistant.entertainment.previewDimming()}><Gauge size={15} /></button>} /></Panel><Panel title="Now Detected">{active && <Row title={active.title} meta={`${active.profile} - ${formatDuration(active.durationSeconds)} - ${active.appName}`} />}{snapshot?.detected.slice(0, 5).map((item) => <Row key={`${item.pid}-${item.title}`} title={item.title} meta={`${item.kind} - ${item.reason} - ${item.confidence}%`} />)}{!snapshot?.detected.length && <Empty text="Launch a game, media player, or streaming page and NahkriinOS will detect it." />}</Panel><Panel title="Cinema Settings"><div className="form"><label><input type="checkbox" checked={settings.entertainment.monitorDimmingEnabled} onChange={(e) => setSettings({ ...settings, entertainment: { ...settings.entertainment, monitorDimmingEnabled: e.target.checked } })} /> Dim other monitors during Watching Mode</label><label><input type="checkbox" checked={settings.entertainment.onlyDimFullscreenPlayback} onChange={(e) => setSettings({ ...settings, entertainment: { ...settings.entertainment, onlyDimFullscreenPlayback: e.target.checked } })} /> Only dim during fullscreen playback</label><label><input type="checkbox" checked={settings.entertainment.keepOverlayMonitorUndimmed} onChange={(e) => setSettings({ ...settings, entertainment: { ...settings.entertainment, keepOverlayMonitorUndimmed: e.target.checked } })} /> Keep overlay monitor undimmed</label><label>Dim amount {Math.round(settings.entertainment.dimAmount * 100)}%<input type="range" min="0.2" max="0.92" step="0.02" value={settings.entertainment.dimAmount} onChange={(e) => setSettings({ ...settings, entertainment: { ...settings.entertainment, dimAmount: Number(e.target.value) } })} /></label><label>Fade duration<input type="number" min="0" max="3000" step="50" value={settings.entertainment.dimFadeMs} onChange={(e) => setSettings({ ...settings, entertainment: { ...settings.entertainment, dimFadeMs: Number(e.target.value) } })} /></label><label><input type="checkbox" checked={settings.entertainment.dimDebug} onChange={(e) => setSettings({ ...settings, entertainment: { ...settings.entertainment, dimDebug: e.target.checked } })} /> Dimming debug logs</label><button onClick={() => window.assistant.entertainment.previewDimming()}><Gauge size={16} /> Preview dimming</button><button onClick={() => save()}><Save size={16} /> Save cinema settings</button></div></Panel></div><div className="columns wide-columns"><FpsDropAnalysisPanel /><Panel title="Tonight's Picks"><div className="recommendation-grid">{recommendations.slice(0, 6).map((item) => <div className="recommendation-card" key={item.id}><span>{item.category} - {item.confidence}</span><strong>{item.title}</strong><p>{item.explanation}</p><small>{item.source === "openai" ? "OpenAI recommendation" : "Local insight"}</small></div>)}</div>{!recommendations.length && <Empty text="Generate picks after a little play/watch history, or ask the assistant what to play tonight." />}</Panel><Panel title="Privacy & Controls"><div className="form"><label><input type="checkbox" checked={settings.entertainment.trackingEnabled} onChange={(e) => setSettings({ ...settings, entertainment: { ...settings.entertainment, trackingEnabled: e.target.checked } })} /> Track sessions locally</label><label><input type="checkbox" checked={settings.entertainment.immersiveEnabled} onChange={(e) => setSettings({ ...settings, entertainment: { ...settings.entertainment, immersiveEnabled: e.target.checked } })} /> Enable immersive mode</label><label><input type="checkbox" checked={settings.entertainment.autoDetect} onChange={(e) => setSettings({ ...settings, entertainment: { ...settings.entertainment, autoDetect: e.target.checked } })} /> Auto-detect games/media</label><label><input type="checkbox" checked={settings.entertainment.suppressNotifications} onChange={(e) => setSettings({ ...settings, entertainment: { ...settings.entertainment, suppressNotifications: e.target.checked } })} /> Suppress non-critical notifications</label><label><input type="checkbox" checked={settings.entertainment.pauseBackgroundScans} onChange={(e) => setSettings({ ...settings, entertainment: { ...settings.entertainment, pauseBackgroundScans: e.target.checked } })} /> Pause scans/indexing</label><input value={settings.entertainment.excludedApps.join(", ")} onChange={(e) => setSettings({ ...settings, entertainment: { ...settings.entertainment, excludedApps: e.target.value.split(",").map((item) => item.trim()).filter(Boolean) } })} placeholder="Excluded apps, comma separated" /><button onClick={() => save()}><Save size={16} /> Save entertainment settings</button><button className="danger" onClick={async () => confirm("Clear entertainment history?") && setData(await window.assistant.entertainment.clear())}><Trash2 size={16} /> Clear history</button></div></Panel><Panel title="Recent Activity"><div className="activity-timeline">{recent.slice(0, 8).map((item) => <div className="timeline-item" key={item.id}><div><strong>{item.title}</strong><span>{item.kind} - {formatDuration(item.durationSeconds)} - {new Date(item.startedAt).toLocaleString()}</span></div><small>{item.profile}</small></div>)}</div>{!recent.length && <Empty text="Your local play/watch history will appear here." />}</Panel></div></section>;
 }
 
 function UpdatesView({ data, setData }: { data: AppData; setData: (data: AppData) => void }) {
@@ -2063,7 +2149,7 @@ function SettingsView({ data, setData }: { data: AppData; setData: (data: AppDat
     <h2>Settings</h2>
     {notice && <div className="source-chips"><span>{notice}</span></div>}
     <div className="editor-grid">
-      <Panel title="Appearance & Startup"><div className="form"><select value={settings.theme} onChange={(e) => setSettings({ ...settings, theme: e.target.value as AppSettings["theme"] })}><option value="midnight">Midnight blue</option><option value="dark">Graphite dark</option><option value="oled">OLED black</option><option value="light">Light</option><option value="system">System</option></select><input type="color" value={settings.accent} onChange={(e) => setSettings({ ...settings, accent: e.target.value })} /><input value={settings.globalShortcut} onChange={(e) => setSettings({ ...settings, globalShortcut: e.target.value })} /><label><input type="checkbox" checked={settings.launchAtStartup} onChange={(e) => setSettings({ ...settings, launchAtStartup: e.target.checked })} /> Open NahkriinOS at startup</label><button onClick={save}><Save size={16} /> Save settings</button></div></Panel>
+      <Panel title="Appearance & Startup"><div className="form"><select value={settings.theme} onChange={(e) => setSettings({ ...settings, theme: e.target.value as AppSettings["theme"] })}><option value="midnight">Midnight blue</option><option value="dark">Graphite dark</option><option value="oled">OLED black</option><option value="light">Light</option><option value="system">System</option></select><input type="color" value={settings.accent} onChange={(e) => setSettings({ ...settings, accent: e.target.value })} /><Row title="Keyboard shortcuts" meta="Disabled. Use the sidebar button to open search so games never trigger NahkriinOS." /><label><input type="checkbox" checked={settings.launchAtStartup} onChange={(e) => setSettings({ ...settings, launchAtStartup: e.target.checked })} /> Open NahkriinOS at startup</label><button onClick={save}><Save size={16} /> Save settings</button></div></Panel>
       <Panel title="Second Brain"><div className="form"><label><input type="checkbox" checked={settings.secondBrain.enabled} onChange={(e) => setBrain("enabled", e.target.checked)} /> Enable Second Brain</label><label><input type="checkbox" checked={settings.secondBrain.includeClipboard} onChange={(e) => setBrain("includeClipboard", e.target.checked)} /> Include clipboard history</label><label><input type="checkbox" checked={settings.secondBrain.includeAiChats} onChange={(e) => setBrain("includeAiChats", e.target.checked)} /> Include AI conversations</label><label><input type="checkbox" checked={settings.secondBrain.includeFiles} onChange={(e) => setBrain("includeFiles", e.target.checked)} /> Include indexed files</label><label><input type="checkbox" checked={settings.secondBrain.includeDownloads} onChange={(e) => setBrain("includeDownloads", e.target.checked)} /> Include Downloads folder</label><label><input type="checkbox" checked={settings.secondBrain.includeScreenshots} onChange={(e) => setBrain("includeScreenshots", e.target.checked)} /> Include screenshots and clips</label><label><input type="checkbox" checked={settings.secondBrain.includeEntertainment} onChange={(e) => setBrain("includeEntertainment", e.target.checked)} /> Include games and media activity</label><label>Max indexed memories<input type="number" min="200" max="10000" value={settings.secondBrain.maxIndexedFiles} onChange={(e) => setBrain("maxIndexedFiles", Number(e.target.value))} /></label><label>Retention days<input type="number" min="7" max="730" value={settings.secondBrain.retentionDays} onChange={(e) => setBrain("retentionDays", Number(e.target.value))} /></label><textarea value={settings.secondBrain.excludedFolders.join("\n")} onChange={(e) => setBrain("excludedFolders", e.target.value.split("\n").map((row) => row.trim()).filter(Boolean))} placeholder="Excluded folders, one per line" /><button onClick={save}><Save size={16} /> Save Second Brain</button><small>Indexing is local-first and on demand. Excluded folders are skipped, and Windows system locations stay out of the memory index by default.</small></div></Panel>
       <Panel title="Discord Reminder Backend"><div className="form"><Row title={discord?.configured ? "VPS reminder backend connected" : "VPS reminder backend not configured"} meta={`Target user ${settings.discord.targetUserId || "203025242753335296"} - ${discord?.secureStorage ? "OS secure storage" : "local encrypted storage unavailable"}`} /><label><input type="checkbox" checked={settings.discord.enabled} onChange={(e) => setSettings({ ...settings, discord: { ...settings.discord, enabled: e.target.checked } })} /> Enable Discord reminder DMs</label><label><input type="checkbox" checked={settings.discord.syncEnabled} onChange={(e) => setSettings({ ...settings, discord: { ...settings.discord, syncEnabled: e.target.checked } })} /> Sync reminders with VPS</label><input value={settings.discord.backendUrl} onChange={(e) => setSettings({ ...settings, discord: { ...settings.discord, backendUrl: e.target.value } })} placeholder="https://your-vps.example.com/reminders" /><input value={settings.discord.targetUserId} onChange={(e) => setSettings({ ...settings, discord: { ...settings.discord, targetUserId: e.target.value } })} placeholder="Discord user ID" /><input type="password" value={discordBackendToken} onChange={(e) => setDiscordBackendToken(e.target.value)} placeholder="Paste VPS backend API token" /><button onClick={testDiscord}><Bell size={16} /> Test Discord DM</button><button onClick={syncDiscord}><RotateCcw size={16} /> Sync now</button><button onClick={save}><Save size={16} /> Save Discord settings</button></div></Panel>
       <Panel title="OpenAI Assistant"><div className="form"><Row title={aiStatus?.configured ? "OpenAI connected" : "OpenAI disconnected"} meta={`${aiStatus?.model ?? settings.ai.model} - ${aiStatus?.secureStorage ? "OS secure storage" : "local encrypted storage unavailable"}`} /><input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Paste a new OpenAI API key" /><input value={settings.ai.model} onChange={(event) => setSettings({ ...settings, ai: { ...settings.ai, model: event.target.value } })} placeholder="OpenAI model, e.g. gpt-4.1-mini" /><label><input type="checkbox" checked={settings.ai.previewContext} onChange={(event) => setSettings({ ...settings, ai: { ...settings.ai, previewContext: event.target.checked } })} /> Preview context before sending</label><button onClick={testKey}><CheckCircle2 size={16} /> Test API key</button><button onClick={save}><Save size={16} /> Save OpenAI settings</button></div></Panel>
@@ -2075,11 +2161,11 @@ function SettingsView({ data, setData }: { data: AppData; setData: (data: AppDat
     </div>
   </section>;
 }
-function CommandPalette({ data, query, setQuery, close, runCommand, setView }: { data: AppData; query: string; setQuery: (q: string) => void; close: () => void; runCommand: (command: CommandItem) => void; setView: (view: string) => void }) {
+function CommandPalette({ data, query, setQuery, close, runCommand, setView, setSelectedGameKey }: { data: AppData; query: string; setQuery: (q: string) => void; close: () => void; runCommand: (command: CommandItem) => void; setView: (view: string) => void; setSelectedGameKey: (key: string) => void }) {
   const commandMatches = data.commands.filter((command) => `${command.name} ${command.value}`.toLowerCase().includes(query.toLowerCase())).slice(0, 8);
   const fileMatches = data.fileIndex.filter((file) => `${file.name} ${file.path}`.toLowerCase().includes(query.toLowerCase())).slice(0, 6);
   const memoryMatches = data.secondBrainItems.filter((item) => `${item.title} ${item.preview} ${item.path ?? ""}`.toLowerCase().includes(query.toLowerCase())).slice(0, 6);
-  return <div className="overlay" onMouseDown={close}><div className="palette" onMouseDown={(e) => e.stopPropagation()}><div className="palette-search"><Search size={18} /><input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Escape" && close()} placeholder="Type a command, file, note, memory, or destination" /></div><h3>Commands</h3>{commandMatches.map((command) => <Row key={command.id} title={command.name} meta={command.value} action={<button onClick={() => runCommand(command)}><Play size={15} /></button>} />)}<h3>Memories</h3>{memoryMatches.map((item) => <Row key={item.id} title={item.title} meta={`${kindLabel(item.kind)} - ${item.source}`} action={<button onClick={() => { setView("brain"); close(); }}><Brain size={15} /></button>} />)}<h3>Files</h3>{fileMatches.map((file) => <Row key={file.id} title={file.name} meta={file.path} action={<button onClick={() => window.assistant.files.open(file.path)}><FolderOpen size={15} /></button>} />)}<h3>Destinations</h3>{nav.map(([id, Icon, label]) => <Row key={id} title={label} meta="Open view" action={<button onClick={() => { setView(id); close(); }}><Icon size={15} /></button>} />)}</div></div>;
+  return <div className="overlay" onMouseDown={close}><div className="palette" onMouseDown={(e) => e.stopPropagation()}><div className="palette-search"><Search size={18} /><input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Escape" && close()} placeholder="Type a command, file, note, memory, or destination" /></div><h3>Commands</h3>{commandMatches.map((command) => <Row key={command.id} title={command.name} meta={command.value} action={<button onClick={() => runCommand(command)}><Play size={15} /></button>} />)}<h3>Memories</h3>{memoryMatches.map((item) => <Row key={item.id} title={item.title} meta={`${kindLabel(item.kind)} - ${item.source}`} action={<button onClick={() => { if (item.kind === "game") { const match = buildGameLibrary(data).find((game) => game.name === item.title || item.preview.includes(game.name)); if (match) setSelectedGameKey(match.key); setView("games"); } else { setView("brain"); } close(); }}>{item.kind === "game" ? <Gamepad2 size={15} /> : <Brain size={15} />}</button>} />)}<h3>Files</h3>{fileMatches.map((file) => <Row key={file.id} title={file.name} meta={file.path} action={<button onClick={() => window.assistant.files.open(file.path)}><FolderOpen size={15} /></button>} />)}<h3>Destinations</h3>{nav.map(([id, Icon, label]) => <Row key={id} title={label} meta="Open view" action={<button onClick={() => { setView(id); close(); }}><Icon size={15} /></button>} />)}</div></div>;
 }
 
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {

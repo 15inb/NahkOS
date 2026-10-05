@@ -6,6 +6,7 @@
   "description": "NahkriinOS VPS-hosted Discord reminder bot and sync API",
   "main": "index.mjs",
   "scripts": {
+    "test": "node --test reminder-actions.test.mjs",
     "start": "node index.mjs",
     "dev": "node --watch index.mjs"
   },
